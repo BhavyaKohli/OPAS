@@ -12,15 +12,15 @@ import torch.nn.functional as F
 from datetime import datetime
 from tqdm.auto import tqdm
 
-from parseq.tstok.tokenizer import Tokenizer
-from parseq.utils import AttributeDict, gumbel_sinkhorn, normalize, get_parseq_constants
-from parseq.data import PairDatasetTrain, PairDatasetTest
+from opas.tstok.tokenizer import Tokenizer
+from opas.utils import AttributeDict, gumbel_sinkhorn, normalize, get_opas_constants
+from opas.data import PairDatasetTrain, PairDatasetTest
 
-from parseq.models.main import LamModel, ScoreModel, PositionalEncoding
-from parseq.models.cifar_embed import Autoencoder
-from parseq.models.lsun_embed import Autoencoder as LSUNAutoencoder
-from parseq.models.ts_encoders import Conv1dTS, EncConv1dTS, MelConv1dTS
-from parseq.models.deepset import DeepSetModel
+from opas.models.main import LamModel, ScoreModel, PositionalEncoding
+from opas.models.cifar_embed import Autoencoder
+from opas.models.lsun_embed import Autoencoder as LSUNAutoencoder
+from opas.models.ts_encoders import Conv1dTS, EncConv1dTS, MelConv1dTS
+from opas.models.deepset import DeepSetModel
 
 from transformers import get_linear_schedule_with_warmup, AdamW
 
@@ -537,7 +537,7 @@ if __name__ == '__main__':
 
     logging.info("*"*120+"\n"+"*"*120)
 
-    A_mat, a_vec, Rm_mat = get_parseq_constants(PARAMS.M, PARAMS.N, DEVICE)
+    A_mat, a_vec, Rm_mat = get_opas_constants(PARAMS.M, PARAMS.N, DEVICE)
 
     batch_size = args.batch_size
     positive_samples = 10
@@ -568,7 +568,7 @@ if __name__ == '__main__':
     if args.wandb_log : 
         wandb.init(
             # set the wandb project where this run will be logged
-            project = "Parseq - Experiments",
+            project = "Opas - Experiments",
             
             # track hyperparameters and run metadata
             config = {

@@ -28,7 +28,7 @@ def make_A(m, n):
     return A
 
 
-def get_parseq_constants(M, N, device):
+def get_opas_constants(M, N, device):
     A_mat = make_A(M, N).float().to(device)[:, :M]
     A_mat[0,0] = 0
     a_vec = torch.tensor([[1.2**i for i in range(N)]]).T.float().to(device)

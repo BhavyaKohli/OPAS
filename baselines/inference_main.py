@@ -5,22 +5,22 @@ import h5py
 import logging
 import os, sys
 import argparse
-sys.path.append('/raid/infolab/bhavyakohli/parseq/')
+sys.path.append('/raid/infolab/bhavyakohli/opas/')
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from parseq.tstok.tokenizer import Tokenizer
-from parseq.utils import make_A, AttributeDict
+from opas.tstok.tokenizer import Tokenizer
+from opas.utils import make_A, AttributeDict
 from torch.utils.data import DataLoader, Dataset
-from parseq.gumbel_sinkhorn_ops import gumbel_sinkhorn
+from opas.gumbel_sinkhorn_ops import gumbel_sinkhorn
 
 from time import time
 from datetime import datetime
 from configparser import ConfigParser
 
-from scripts.main import *
+from main import *
 from tqdm import tqdm  
 from argparse import ArgumentParser, Namespace as AttributeDict
 
@@ -256,7 +256,7 @@ if __name__ == "__main__":
     logging.info(experiment_id)
 
     if experiment_id.startswith("C"):
-        image_embed_model_ckpt = "/raid/infolab/bhavyakohli/parseq/data/video_cifar/autoencoder/weights/cifar_ae_final.pkl"
+        image_embed_model_ckpt = "/raid/infolab/bhavyakohli/opas/data/video_cifar/autoencoder/weights/cifar_ae_final.pkl"
         image_embed_model = Autoencoder()
         image_embed_model.load_state_dict(torch.load(image_embed_model_ckpt))
         image_embed_model.eval()
@@ -265,7 +265,7 @@ if __name__ == "__main__":
             param.requires_grad = False    
 
     elif experiment_id.startswith("L"):
-        image_embed_model_ckpt = "/raid/infolab/bhavyakohli/parseq/data/video_lsun/autoencoder/weights2/lsun_ae_384.pkl"
+        image_embed_model_ckpt = "/raid/infolab/bhavyakohli/opas/data/video_lsun/autoencoder/weights2/lsun_ae_384.pkl"
         image_embed_model = LSUNAutoencoder()
         image_embed_model.load_state_dict(torch.load(image_embed_model_ckpt))
         image_embed_model.eval()
@@ -273,7 +273,7 @@ if __name__ == "__main__":
         for param in image_embed_model.parameters():
             param.requires_grad = False
 
-    root = f"/raid/infolab/bhavyakohli/parseq/scripts/models/{experiment_id}/"
+    root = f"/raid/infolab/bhavyakohli/opas/scripts/models/{experiment_id}/"
     DEVICE = f'cuda:{args.device}' if args.device != -1 else "cpu"
 
     if experiment_id[0] in ["C", "L"]:
@@ -302,7 +302,7 @@ if __name__ == "__main__":
 
     logging.info(f"normscore weight: {nwt:.4f}, lamscore weight: {lamwt:.4f}")
 
-    ##### PARSEQ HPARAMS ######
+    ##### opas HPARAMS ######
     b = args.b          # hinge margin for negative gap penalty (b-Apa)
     b1 = args.b1         # hinge margin for positive gap penalty (Apa-b)
     delta = args.delta     # hinge margin for contrastive loss
@@ -316,7 +316,7 @@ if __name__ == "__main__":
     N = 20
     ####################
 
-    A_mat, a_vec, Rm_mat = get_parseq_constants(M, N, DEVICE)
+    A_mat, a_vec, Rm_mat = get_opas_constants(M, N, DEVICE)
 
     CFG = AttributeDict(tau=1, n_sink_iter=20, n_samples=1)
 
@@ -324,9 +324,9 @@ if __name__ == "__main__":
     GLOBAL_TIMES = AttributeDict()
 
     ######################################################
-    ######### CORPUS EMBEDDING FOR PARSEQ ################
+    ######### CORPUS EMBEDDING FOR opas ################
     ######################################################
-    num_runs = int(config['parseq_cembed']['num_runs'])
+    num_runs = int(config['opas_cembed']['num_runs'])
 
     ts = []
     for _ in tqdm(range(num_runs), desc="Corpus Embedding"):
@@ -339,16 +339,16 @@ if __name__ == "__main__":
     GLOBAL_TIMES.corpus_embedding = get_time_entry(ts, num_runs)
     logging.info(f"Corpus embedding cost for {len(test_dataset.c)} corpus items (one-time cost): {mu:.4f}±{sig:.4f} s (averaged over {num_runs} runs)")
 
-    ## PARSEQ GPU
+    ## opas GPU
 
-    logging.info("\n\nRunning PARSEQ (GPU)")
+    logging.info("\n\nRunning opas (GPU)")
 
     model, scoremodel, embed_model, preembed_model = model.to(DEVICE), scoremodel.to(DEVICE), embed_model.to(DEVICE), preembed_model.to(DEVICE)
-    A_mat, a_vec, Rm_mat = get_parseq_constants(M, N, DEVICE)
+    A_mat, a_vec, Rm_mat = get_opas_constants(M, N, DEVICE)
 
     num_c = len(C)
-    num_q = int(config['parseq_gpu']['num_q'])
-    num_runs = int(config['parseq_gpu']['num_runs'])
+    num_q = int(config['opas_gpu']['num_q'])
+    num_runs = int(config['opas_gpu']['num_runs'])
     n_inner = 1
     
     # torch.manual_seed(69420)
@@ -359,7 +359,7 @@ if __name__ == "__main__":
 
     ts = []
     map, mrr = [], []
-    for _ in tqdm(range(num_runs), desc="PARSEQ (GPU)"):
+    for _ in tqdm(range(num_runs), desc="opas (GPU)"):
         start = time()
         netscore, true_labels = get_batch_scores(q, l, C, model, scoremodel, embed_model, preembed_model, stagger=stagger)
         map_, mrr_ = compute_map_mrr(netscore, true_labels)
@@ -370,7 +370,7 @@ if __name__ == "__main__":
         mrr.append(mrr_)
 
     print_stats(ts, num_runs, num_c, num_q, map, mrr)
-    GLOBAL_TIMES.parseq_gpu = get_time_entry(ts, num_runs, num_c, num_q, map, mrr) 
+    GLOBAL_TIMES.opas_gpu = get_time_entry(ts, num_runs, num_c, num_q, map, mrr) 
 
     tensors['ptime'] = 1000 * np.mean(ts)/num_q/num_q 
     tensors['map'] = np.mean(map) 
@@ -378,21 +378,21 @@ if __name__ == "__main__":
     torch.save(tensors, f"tensors_{args.dataset}.pt")
     raise
 
-    ## PARSEQ CPU
+    ## opas CPU
 
-    if config['parseq_cpu'].getint('skip', 0)==0:
-        logging.info("\n\nRunning PARSEQ (CPU)")
+    if config['opas_cpu'].getint('skip', 0)==0:
+        logging.info("\n\nRunning opas (CPU)")
 
-        num_runs = int(config['parseq_cpu']['num_runs'])
+        num_runs = int(config['opas_cpu']['num_runs'])
 
         testdevice = 'cpu'
         model, scoremodel, embed_model, preembed_model = model.to(testdevice), scoremodel.to(testdevice), embed_model.to(testdevice), preembed_model.to(testdevice)
-        A_mat, a_vec, Rm_mat = get_parseq_constants(M, N, testdevice)
+        A_mat, a_vec, Rm_mat = get_opas_constants(M, N, testdevice)
         n_inner = 1
 
         ts = []
         map, mrr = [], []
-        for _ in tqdm(range(num_runs), desc="PARSEQ (CPU)"):
+        for _ in tqdm(range(num_runs), desc="opas (CPU)"):
             start = time()
             netscore, true_labels = get_batch_scores(q, l, C.to('cpu'), model, scoremodel, embed_model, preembed_model, stagger=stagger)
             map_, mrr_ = compute_map_mrr(netscore, true_labels)
@@ -404,7 +404,7 @@ if __name__ == "__main__":
             mrr.append(mrr_)
 
         print_stats(ts, num_runs, num_c, num_q, map, mrr)
-        GLOBAL_TIMES.parseq_cpu = get_time_entry(ts, num_runs, num_c, num_q, map, mrr)
+        GLOBAL_TIMES.opas_cpu = get_time_entry(ts, num_runs, num_c, num_q, map, mrr)
 
 
     #######################################################

@@ -11,8 +11,8 @@ import torchvision.transforms as transforms
 
 from tqdm import tqdm
 
-from parseq.models.cifar_embed import Autoencoder
-from parseq.models.lsun_embed import Autoencoder as LSUNAutoencoder
+from opas.models.cifar_embed import Autoencoder
+from opas.models.lsun_embed import Autoencoder as LSUNAutoencoder
 
 SEED = 87
 np.random.seed(SEED)

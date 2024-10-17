@@ -1,6 +1,8 @@
 import os
 
 from main import *
+from opas.utils import get_opas_constants
+
 
 
 @torch.no_grad()
@@ -166,7 +168,7 @@ if __name__ == "__main__":
     N = 20
     ####################
 
-    A_mat, a_vec, Rm_mat = get_parseq_constants(M, N, DEVICE)
+    A_mat, a_vec, Rm_mat = get_opas_constants(M, N, DEVICE)
 
     CFG = AttributeDict({
         'tau': 1,
