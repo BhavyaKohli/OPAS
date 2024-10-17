@@ -43,7 +43,7 @@ def embed(model, x):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('--dataset_name', type=str, choices=["CIFAR", "LSUN"])
-    parser.add_argument('--autoencoder_weights', type=str, help="Path to autoencoder weights, stored in ./weights by default if using `train_ae.py` script")
+    parser.add_argument('--autoencoder_weights', type=str, help="Path to autoencoder weights, stored in ./embedding_models by default if using `train_ae.py` script")
     parser.add_argument('--device', type=int, default=-1, help="Cuda device index, pass -1 to run on cpu (not recommended)")
     args = parser.parse_args()
 
