@@ -163,6 +163,14 @@ if __name__ == '__main__':
     os.makedirs(dataset_dir, exist_ok=True)
     if args.log : logging.info(f"Created dataset directory at {dataset_dir}")
 
+    # expected input file structure:
+    # keys: audio, labels
+    # file['audio'] : (N x samp_rate)
+    # these N-length items are collected from different songs, each with a different label
+    # file['labels']: (N) 
+    # these labels are the original song labels for each item in `audio`
+    # example: 2 songs of length 80 seconds each, with 20 second clips, will have 8 items with labels 0,0,0,0,1,1,1,1
+
     file = h5py.File(args.input_file, 'r')
     SONGS = file['audio'] 
     SONGS_id = file['labels']
