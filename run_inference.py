@@ -125,7 +125,7 @@ if __name__ == "__main__":
     print(f"normscore weight: {nwt:.4f}, lamscore weight: {lamwt:.4f}")
     
     image_embed_model = None
-    if dataset == "cifar":
+    if dataset.startswith("cifar"):
         image_embed_model_ckpt = "data/image_sequence/embedding_models/cifar_ae.pkl"
         image_embed_model = Autoencoder()
         image_embed_model.load_state_dict(torch.load(image_embed_model_ckpt))
@@ -136,7 +136,7 @@ if __name__ == "__main__":
 
         image_embed_model = image_embed_model.to(DEVICE)
     
-    if dataset == "lsun384":
+    if dataset.startswith("lsun"):
         image_embed_model_ckpt = "data/image_sequence/embedding_models/lsun_ae.pkl"
         image_embed_model = LSUNAutoencoder()
         image_embed_model.load_state_dict(torch.load(image_embed_model_ckpt))
