@@ -101,7 +101,7 @@ The directory structure after downloading the datasets and model files should be
 ## training
 Use script `main.py` for training OPAS given the dataset is in the correct format in `final_data`
 
-Scripts used to train OPAS on the Music, Speech, CIFAR, and LSUN datasets (numbers used in the paper) are given below. These are mostly for reference since the actual datasets are not explicitly being provided. But after generating, say, an audio-based dataset, one can execute training using the commands if the dataset parameters are similar (sampling rate).  
+Scripts used to train OPAS on the Music, Speech, CIFAR, and LSUN datasets (numbers used in the paper) are given below:  
 
 1. `python main.py --nepochs 30 --preembed tokenize --device $device --xoutdim 128 --batch_size 400 --xlr 5e-6 --xff 512 --delta 0.3 --dataset audio --stagger 0 --print_dataset`
 2. `python main.py --nepochs 30 --preembed tokenize --device $device --xoutdim 128 --batch_size 400 --xlr 5e-6 --xff 512 --delta 0.3 --dataset speech --stagger 0 --print_dataset`
