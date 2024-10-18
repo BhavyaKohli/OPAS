@@ -15,6 +15,6 @@ if __name__ == "__main__":
             q, l = next(iter(loader))
             tensors = {'q': q, 'l': l, 'c': torch.from_numpy(test_dataset.c)}
 
-            torch.save(tensors, f"tensors_{args.dataset}.pt")
+            torch.save(tensors, f"tensors_{dataset}.pt")
         except Exception as e:
             print(f"Dataset {dataset} failed with error: {e}")
