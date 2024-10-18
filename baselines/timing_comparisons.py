@@ -161,12 +161,12 @@ if __name__ == "__main__":
     parser.add_argument("--skip_baselines", action="store_true", help="pass when only OPAS numbers are required")
     args = parser.parse_args()
     
+    SKIP = args.skip
     if args.skip_baselines:
         for baseline in ["sharp", "fdtw", "sdtw", "mass"]:
             config[baseline]['skip'] = 1
         logging.info(f"Skipping all baselines")
     else:
-        SKIP = args.skip
         logging.info(f"RUNNING BASELINES WITH SKIP: {SKIP}")
 
     experiment_id = args.expt_id 

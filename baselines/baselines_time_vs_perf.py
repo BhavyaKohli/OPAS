@@ -121,7 +121,6 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser('Inference Time Comparisons')
     parser.add_argument("--dataset", type=str, help="dataset", choices=["audio", "speech", "cifar", "lsun"])
     parser.add_argument("--debug", action='store_true', help="debug mode")
-    parser.add_argument("--topk", action='store_true', help="compute topk hits in addition to MAP and MRR")
     args = parser.parse_args()
 
     test_dataset = DatasetTensors(args.dataset)
@@ -142,12 +141,12 @@ if __name__ == "__main__":
     GLOBAL_TIMES = AttributeDict()
 
     DEBUG = args.debug
-    TOPK = args.topk
+    TOPK = False        # not used in current version
 
     if TOPK: k = [1, 2, 3]
     else: k = None
 
-    def run_baseline(name, distance_function, num_c, num_runs, num_q, SKIP):
+    def run_baseline(name, distance_function, q, test_dataset_c, num_c, num_runs, num_q, SKIP):
         logging.info(f"\nRunning {name}")
 
         inclusions = []
@@ -158,16 +157,16 @@ if __name__ == "__main__":
 
         ts = []
         map, mrr, hitsk = [], [], []
-        for _ in tqdm(range(num_runs), desc=name.upper()):
-            method_q = q.clone()[:num_q].flatten(start_dim=2)
-            method_q = method_q + batch_get_white_noise(method_q, args.SNR)
+        for _ in tqdm(range(num_runs), desc=f"{SKIP}: {name.upper()}"):
+            method_q = q.clone()[:num_q]
+            method_q = method_q + batch_get_white_noise(method_q, 1)
             method_q = normalize(method_q)
 
-            c = test_dataset.c[inclusions]
+            c = test_dataset_c[inclusions]
             
             random_idxs = np.random.choice(other_idxs, size=num_c-len(c), replace=False)
-            c_ = test_dataset.c[random_idxs]
-            method_c = normalize(torch.from_numpy(np.vstack((c, c_)))).flatten(start_dim=2)
+            c_ = test_dataset_c[random_idxs]
+            method_c = normalize(torch.from_numpy(np.vstack((c, c_))))
 
             method_l = torch.hstack((l[:num_q,inclusions],l[:num_q,random_idxs]))
             sim = torch.zeros(method_q.shape[0], method_c.shape[0])
@@ -175,27 +174,27 @@ if __name__ == "__main__":
             start = time()
             for i, query in enumerate(method_q):
                 for j, corpus in enumerate(method_c):
-                    sim[i,j] = -distance_function(corpus.cpu().numpy()[:,::SKIP], query.cpu().numpy()[:,::SKIP])
-            map_, mrr_, hitsk_ = compute_map_mrr(sim, method_l, k=k)        
+                    sim[i,j] = -distance_function(corpus.cpu().numpy(), query.cpu().numpy())
+            map_, mrr_, hitsk_ = compute_map_mrr(sim, method_l, k=k)
             stop = time()
 
             t = (stop-start)
             ts.append(t)
             map.append(map_)
-            mrr.append(mrr_)
-            hitsk.append(hitsk_)
+            mrr.append(mrr_); hitsk.append(hitsk_)
 
         time_per_comp, map_, mrr_, hitsk_ = get_run_stats(ts, num_runs, num_c, num_q, map, mrr, hitsk)
-        setattr(GLOBAL_TIMES, name, [SKIP, time_per_comp, map_, mrr_, hitsk_])
+        setattr(GLOBAL_TIMES, name, [SKIP, time_per_comp, map_, mrr_])
 
+    os.makedirs("../plots_and_figures/data/", exist_ok=True)
 
-    with open("../plots_and_figures/times.log", "a+") as main_logfile:
+    with open(f"../plots_and_figures/data/times_{args.dataset}.log", "a+") as main_logfile:
         print(f"Dataset: {args.dataset}", file=main_logfile)
 
-        SKIP_LIST = [5, 10, 50, 100, 200, 500, 1000]       # inputs: 4000 (audio), 3072 (cifar)
+        SKIP_LIST = [5, 10, 50, 100, 200, 500, 1000][::-1]       # inputs: 4000 (audio), 3072 (cifar)
         if args.dataset == "lsun":
             # original = 196_608
-            SKIP_LIST = [500, 1000, 15000, 25000, 30000, 40000, 50000, 90000]
+            SKIP_LIST = [500, 1000, 15000, 25000, 30000, 40000, 50000, 90000][::-1]
         
         list_of_times = []
         for SKIP in SKIP_LIST:
@@ -214,7 +213,7 @@ if __name__ == "__main__":
                 sharp_num_runs = int(config['sharp']['num_runs']) if not DEBUG else 2
                 sharp_num_q = int(config['sharp']['num_q'])
 
-                run_baseline("SHARP", sharp_sdtw_div, sharp_num_c, sharp_num_runs, sharp_num_q)
+                run_baseline("SHARP", sharp_sdtw_div, q, test_dataset_c, sharp_num_c, sharp_num_runs, sharp_num_q, SKIP)
             
             if DEBUG:
                 print(GLOBAL_TIMES); raise
@@ -233,7 +232,7 @@ if __name__ == "__main__":
                 cs = lambda x, y: 1 - np.dot(x, y) / np.linalg.norm(x) / np.linalg.norm(y)
                 dtw_func = lambda c, q: dtw(c, q, dist=cs)[0]
 
-                run_baseline("FASTDTW", dtw_func, dtw_num_c, dtw_num_runs, dtw_num_q)
+                run_baseline("FASTDTW", dtw_func, q, test_dataset_c, dtw_num_c, dtw_num_runs, dtw_num_q, SKIP)
 
             #######################################################
             ##################### SDTW ############################
@@ -248,7 +247,7 @@ if __name__ == "__main__":
                 sdtw_num_runs = int(config['sdtw']['num_runs'])
                 sdtw_num_q = int(config['sdtw']['num_q'])
 
-                run_baseline("SDTW", sdtw_div, sdtw_num_c, sdtw_num_runs, sdtw_num_q)
+                run_baseline("SDTW", sdtw_div, q, test_dataset_c, sdtw_num_c, sdtw_num_runs, sdtw_num_q, SKIP)
 
             #######################################################
             ################## MASS ###############################
@@ -270,7 +269,7 @@ if __name__ == "__main__":
                     mass_num_runs = int(config['mass']['num_runs'])
                     mass_num_q = int(config['mass']['num_q'])
 
-                    run_baseline("MASS", mass_dist, mass_num_c, mass_num_runs, mass_num_q)
+                    run_baseline("MASS", mass_dist, q, test_dataset_c, mass_num_c, mass_num_runs, mass_num_q, SKIP)
 
                 except Exception as e:
                     print(f"MASS failed with error: {e}")
