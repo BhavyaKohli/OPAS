@@ -16,9 +16,9 @@ import argparse
 
 from tqdm import tqdm
 import sys
-sys.path.append("/raid/infolab/bhavyakohli/parseq/")
-from parseq.models.lsun_embed import Autoencoder
-from parseq.models.lsun_embed import Autoencoder as LSUNAutoencoder
+sys.path.append("../../")
+from opas.models.cifar_embed import Autoencoder
+from opas.models.lsun_embed import Autoencoder as LSUNAutoencoder
 
 
 def sample(dataset, classes, num_samples):
