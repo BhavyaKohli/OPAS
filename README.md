@@ -27,6 +27,7 @@ The directory structure after downloading the datasets and model files should be
 │   ├── lsun_gt
 │   ├── cifar_gt
 │   ├── audio
+│   │   ├── get_youtube_videos.py
 │   │   └── generate_dataset_audio.py
 │   ├── image_sequence
 │   │   ├── embedding_models
