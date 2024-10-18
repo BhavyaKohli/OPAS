@@ -1,7 +1,7 @@
 # OPAS
 
 ## datasets
-Download `final_data.zip` from [here](https://drive.google.com/drive/folders/1oT5lfTuG-VnygbuUwOOQmbkLvQncN_vu?usp=sharing) and unzip its contents into `final_data`. Due to size constraints, we provide only the processed test subset from the Music, Speech and CIFAR datasets. This will enable the execution of `run_inference.py` along with the timing and memory comparisons (on datasets other than LSUN) in `baselines/`.
+Download `final_data.zip` from [here](https://drive.google.com/drive/folders/1NGFswlmT64AgG4r8847mInPUD3nphCnN?usp=sharing) and unzip its contents into `final_data`. Due to size constraints, we provide only the processed test subset from the Music, Speech and CIFAR datasets. This will enable the execution of `run_inference.py` along with the timing and memory comparisons (on datasets other than LSUN) in `baselines/`.
 
 For custom datasets, refer to `data/audio` for audio-based datasets, and `data/image_sequence` for image sequence datasets.
 
