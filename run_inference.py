@@ -4,7 +4,6 @@ from main import *
 from opas.utils import get_opas_constants
 
 
-
 @torch.no_grad()
 def compute_metrics(dataset, model, scoremodel, embed_model, preembed_model, image_embed_model=None, stagger=2, verbose=False, aggregator=None):
 
@@ -124,8 +123,11 @@ if __name__ == "__main__":
 
     print(f"normscore weight: {nwt:.4f}, lamscore weight: {lamwt:.4f}")
     
+    DATA_ROOT = f"final_data/{dataset}"
+    TEST_FILE = f"{DATA_ROOT}/dataset_test.hdf5"
+
     image_embed_model = None
-    if dataset.startswith("cifar"):
+    if "cifar" in dataset:
         image_embed_model_ckpt = "data/image_sequence/embedding_models/cifar_ae.pkl"
         image_embed_model = Autoencoder()
         image_embed_model.load_state_dict(torch.load(image_embed_model_ckpt))
@@ -135,8 +137,9 @@ if __name__ == "__main__":
             param.requires_grad = False
 
         image_embed_model = image_embed_model.to(DEVICE)
+        TEST_FILE = f"{DATA_ROOT}/dataset_test_orig.hdf5"
     
-    if dataset.startswith("lsun"):
+    if "lsun" in dataset:
         image_embed_model_ckpt = "data/image_sequence/embedding_models/lsun_ae.pkl"
         image_embed_model = LSUNAutoencoder()
         image_embed_model.load_state_dict(torch.load(image_embed_model_ckpt))
@@ -146,10 +149,6 @@ if __name__ == "__main__":
             param.requires_grad = False
 
         image_embed_model = image_embed_model.to(DEVICE)
-
-    DATA_ROOT = f"final_data/{dataset}"
-    TEST_FILE = f"{DATA_ROOT}/dataset_test.hdf5"
-    if dataset == "cifar" or dataset == "lsun384":
         TEST_FILE = f"{DATA_ROOT}/dataset_test_orig.hdf5"
 
     test_dataset = PairDatasetTest(TEST_FILE)

@@ -152,16 +152,22 @@ if __name__ == "__main__":
         format="%(levelname)s (%(asctime)s): %(message)s",
         datefmt="%d/%m/%Y %I:%M:%S %p"
     )
-    config = OmegaConf.load("inference.config")
+    config = OmegaConf.load("configs/main.config")
 
     parser = argparse.ArgumentParser('Inference Time Comparisons')
     parser.add_argument("--expt_id", type=str, help="Experiment ID")
     parser.add_argument("--skip", type=int, help="skip value", default=10)
     parser.add_argument("--device", type=int, help="cuda device, pass -1 for cpu", default=-1)
+    parser.add_argument("--skip_baselines", action="store_true", help="pass when only OPAS numbers are required")
     args = parser.parse_args()
     
-    SKIP = args.skip
-    logging.info(f"RUNNING BASELINES WITH SKIP: {SKIP}")
+    if args.skip_baselines:
+        for baseline in ["sharp", "fdtw", "sdtw", "mass"]:
+            config[baseline]['skip'] = 1
+        logging.info(f"Skipping all baselines")
+    else:
+        SKIP = args.skip
+        logging.info(f"RUNNING BASELINES WITH SKIP: {SKIP}")
 
     experiment_id = args.expt_id 
     logging.info(experiment_id)
@@ -359,10 +365,6 @@ if __name__ == "__main__":
         sharp_num_q = int(config['sharp']['num_q'])
 
         run_baseline("SHARP", sharp_sdtw_div, sharp_num_c, sharp_num_runs, sharp_num_q)
-
-        print_stats(ts, sharp_num_runs, sharp_num_c, sharp_num_q, map, mrr)
-        GLOBAL_TIMES.sharp = get_time_entry(ts, sharp_num_runs, sharp_num_c, sharp_num_q, map, mrr)
-
 
     #######################################################
     ################## FASTDTW ############################
