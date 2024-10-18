@@ -101,4 +101,9 @@ The directory structure after downloading the datasets and model files should be
 ## training
 Use script `main.py` for training OPAS given the dataset is in the correct format in `final_data`
 
-Scripts used to train OPAS on the Music, Speech, CIFAR, and LSUN datasets (numbers used in the paper) are pre-set in `scripts/train.sh`. This can be invoked simply by running `bash scripts/train.sh <dataset> <device>` where `<dataset>` is one of--"audio", "speech", "cifar", "lsun", and `<device>` is the GPU id for the GPU to use for training.
+Scripts used to train OPAS on the Music, Speech, CIFAR, and LSUN datasets (numbers used in the paper) are given below. These are mostly for reference since the actual datasets are not explicitly being provided. But after generating, say, an audio-based dataset, one can execute training using the commands if the dataset parameters are similar (sampling rate).  
+
+1. `python main.py --nepochs 30 --preembed tokenize --device $device --xoutdim 128 --batch_size 400 --xlr 5e-6 --xff 512 --delta 0.3 --dataset audio --stagger 0 --print_dataset`
+2. `python main.py --nepochs 30 --preembed tokenize --device $device --xoutdim 128 --batch_size 400 --xlr 5e-6 --xff 512 --delta 0.3 --dataset speech --stagger 0 --print_dataset`
+3. `python main.py --nepochs 30 --preembed tokenize --device $device --xoutdim 32 --batch_size 800 --xlr 5e-5 --xff 256 --delta 0.7 --num_q 800 --dataset cifar --print_dataset --train_with_orig`
+4. `python main.py --nepochs 30 --preembed tokenize --device $device --xoutdim 64 --batch_size 400 --xlr 5e-5 --lr 5e-4 --xff 256 --delta 0.3 --num_q 800 --dataset lsun --print_dataset`
