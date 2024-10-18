@@ -1,10 +1,11 @@
 # OPAS
 
-# TODOS:
+## datasets
+Download `final_data.zip` from <here> and unzip its contents into `final_data`
 
-1. Update references from PARSEQ to OPAS, **everywhere** :: DONE
-2. Add inference code for baselines :: DONE
-3. remove identifying paths (baselines/inference_main.py) :: DONE
-3. Add code for timing experiments (from local)
-4. Add code for memory experiments (from local)
-5. Add code for obtaining plots (from local)
+For custom datasets, refer to `data/audio` for audio-based datasets, and `data/image_sequence` for image sequence datasets.
+
+## training
+Use script `main.py` for training OPAS given the dataset is in the correct format in `final_data`
+
+Scripts used to train OPAS on the Music, Speech, CIFAR, and LSUN datasets (numbers used in the paper) are pre-set in `scripts/train.sh`. This can be invoked simply by running `bash scripts/train.sh <dataset> <device>` where `<dataset>` is one of--"audio", "speech", "cifar", "lsun", and `<device>` is the GPU id for the GPU to use for training. Example: `bash scripts/train.sh audio 0`
