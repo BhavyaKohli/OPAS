@@ -24,10 +24,19 @@ def compute_metrics(dataset, model, scoremodel, embed_model, preembed_model, ima
         # q is (b, m, xoutdim)
         if aggregator is None:
             qct = torch.einsum("bmd,Nnd->bNmn", q, C)
-            model_inputs = stagger_and_concat(qct, num_stagger=stagger) # bNsmn  s = num_stagger+1
+            if isinstance(model, LamModel):
+                model_inputs = stagger_and_concat(qct, num_stagger=stagger) # bNsmn  s = num_stagger+1
 
-            lambdas = torch.stack([model(x) for x in model_inputs])
-            # bNm1
+                lambdas = torch.stack([model(x) for x in model_inputs])
+                # bNm1
+            else:
+                lambdas = []
+                for xx in range(len(q)):
+                    q_ = q[xx].unsqueeze(0)
+                    q_ = q_.repeat_interleave(C.shape[0], dim=0)
+                    lambdas_ = model(torch.cat((q_, C), dim=1).flatten(start_dim=1)).unsqueeze(-1)
+                    lambdas.append(lambdas_)
+                lambdas = torch.stack(lambdas)
 
             F_mat = Rm_mat.T @ (2*qct + (a_vec @ lambdas.transpose(2,3) @ A_mat).transpose(2,3))
 

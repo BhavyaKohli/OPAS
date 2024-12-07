@@ -440,7 +440,7 @@ if __name__ == '__main__':
     image_embed_model = None
     if "audio" in args.dataset:
         experiment_id = f"A{experiment_id}" 
-    elif "human" in args.dataset:
+    elif "human" in args.dataset or "speech" in args.dataset:
         args.human = True
         experiment_id = f"AH{experiment_id}"
     elif "video" in args.dataset:
@@ -694,7 +694,7 @@ if __name__ == '__main__':
 
     model = LamModel(M, N, stagger).to(DEVICE)
     if args.use_linear_lammodel:
-        model = nn.Linear((M+N)*args.xoutdim, M).to(DEVICE) 
+        model = nn.Sequential(nn.Linear((M+N)*args.xoutdim, M), nn.Sigmoid()).to(DEVICE)
 
     optimizer = torch.optim.Adam(model.parameters(), lr=lr, amsgrad=True)
     sc_optimizer = torch.optim.Adam(scoremodel.parameters(), lr=lr, amsgrad=True, weight_decay=1e-2)
