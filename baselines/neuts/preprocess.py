@@ -4,35 +4,16 @@ import pickle as cPickle
 import numpy as np
 
 
-# def distance_comp(coor_path, data_name, number, distance_type='hausdorff'):
-#     ts_value = cPickle.load(open(coor_path, 'rb'))[0]
-#     np_ts_value = []
-#     for t in ts_value[:number+5]:
-#         np_ts_value.append(np.array(t))
-#     print(np_ts_value[0])
-#     print(np_ts_value[0].shape)
-#     print(len(np_ts_value))
+def distance_comp(coor_path, data_name, number, distance_type='hausdorff'):
+    ts_value = cPickle.load(open(coor_path, 'rb'))[0]
+    np_ts_value = []
+    for t in ts_value[:number+5]:
+        np_ts_value.append(np.array(t))
+    print(np_ts_value[0])
+    print(np_ts_value[0].shape)
+    print(len(np_ts_value))
 
-#     trajecotry_distance_list(np_ts_value, batch_size=100, processors=28, distance_type=distance_type,
-#                              data_name=data_name)
-
-#     trajectory_distance_combain(
-#         number, batch_size=100, metric_type=distance_type, data_name=data_name)
-
-def distance_comp(coor_pathq, coor_pathc, data_name, number, distance_type='hausdorff'):
-    qts_value = cPickle.load(open(coor_pathq, 'rb'))[0]
-    cts_value = cPickle.load(open(coor_pathc, 'rb'))[0]
-    np_qts_value = []
-    for t in qts_value[:number+5]:
-        np_qts_value.append(np.array(t))
-    np_cts_value = []
-    for t in cts_value[:number+5]:
-        np_cts_value.append(np.array(t))
-    print(np_qts_value[0].shape)
-    print(np_cts_value[0].shape)
-    print(len(np_qts_value))
-
-    trajecotry_distance_list(np_qts_value, np_cts_value, batch_size=100, processors=28, distance_type=distance_type,
+    trajecotry_distance_list(np_ts_value, batch_size=100, processors=28, distance_type=distance_type,
                              data_name=data_name)
 
     trajectory_distance_combain(
@@ -50,7 +31,7 @@ if __name__ == '__main__':
     # distance_comp('./features/ItalyPowerDemand_all_ts_value',
     #               'ItalyPowerDemand', 1000, distance_type='cdtw')
     distance_comp('./features/opasaudio_all_qts_value', './features/opasaudio_all_cts_value', 
-                  'opasaudio', 1000, distance_type='cdtw')
+                  'opasaudio', 1000, distance_type='fastdtw')
     # distance_comp('./features/ItalyPowerDemand_all_ts_value',z
     #               'ItalyPowerDemand', 1000, distance_type='erp')
     # distance_comp('./features/ItalyPowerDemand_all_ts_value',
