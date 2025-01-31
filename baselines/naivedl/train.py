@@ -18,6 +18,54 @@ import tools.sampling_methods as sm
 from geo_rnns.wrloss import WeightedRankingLoss
 
 
+from torch.nn import Module
+
+import torch
+
+class RNNEncoder(Module):
+    def __init__(self, input_size, hidden_size):
+        super(RNNEncoder, self).__init__()
+        self.input_size = input_size
+        self.hidden_size = hidden_size
+        self.stard_LSTM = True
+        self.dimensional = 1
+        self.recurrent_unit = 'GRU'
+
+        if self.stard_LSTM:
+            if self.recurrent_unit=='GRU':
+                self.cell = torch.nn.GRUCell(input_size - self.dimensional, hidden_size)
+            elif self.recurrent_unit=='SimpleRNN':
+                self.cell = torch.nn.RNNCell(input_size - self.dimensional, hidden_size)
+            else:
+                self.cell = torch.nn.LSTMCell(input_size - self.dimensional, hidden_size)
+
+    def forward(self, inputs_a, initial_state = None):
+        inputs = inputs_a
+        inputs_len = [inputs.size(1)] * inputs.size(0)
+
+        time_steps = inputs.size(1)
+        out = None
+        if self.recurrent_unit == 'GRU' or self.recurrent_unit == 'SimpleRNN':
+            out = initial_state
+        else:
+            out, state = initial_state
+        outputs = []
+        for t in range(time_steps):
+            if self.stard_LSTM:
+                cell_input = inputs[:, t, :][:,:-self.dimensional]
+            else:
+                cell_input = inputs[:, t, :]
+            if self.recurrent_unit == 'GRU' or self.recurrent_unit == 'SimpleRNN':
+                out = self.cell(cell_input, out)
+            else:
+                out, state = self.cell(cell_input, (out, state))
+            outputs.append(out)
+        mask_out = []
+        for b, v in enumerate(inputs_len):
+            mask_out.append(outputs[v-1][b,:].view(1,-1))
+        return torch.cat(mask_out, dim = 0)
+    
+
 class PositionalEncoding(nn.Module):
     def __init__(self, d_model, max_seq_length):
         super(PositionalEncoding, self).__init__()
@@ -91,11 +139,14 @@ if __name__ == "__main__":
     parser.add_argument("--device", type=int, default=0, help="CUDA device number")
     parser.add_argument("--step", type=int, default=1, help="Step size for downsampling")
     parser.add_argument("--train_size", type=int, default=600, help="Size of the training dataset")
+    parser.add_argument("--model_type", type=str, default="transformer", help="Type of model to train")
     parser.add_argument("--nolog", action="store_true", help="Disable logging")
     args = parser.parse_args()
 
     if not args.nolog:
         expt_name = f"tsize{args.train_size}_step{args.step}"
+        if args.model_type != "transformer":
+            expt_name += f"_{args.model_type}"
         logger.remove(0)
         logger.add(f"./logs/{expt_name}.log")
         logger.info(f"Running with args: {args}")
@@ -112,15 +163,6 @@ if __name__ == "__main__":
     xwarmupepochs = 10
     loss_delta = 1.0
 
-    model = nn.Sequential(
-        PositionalEncoding(d_model=d_model, max_seq_length=20),
-        nn.TransformerEncoder(nn.TransformerEncoderLayer(d_model=d_model, nhead=xnhead, batch_first=True, dim_feedforward=xff), xnumlayers),
-        nn.Linear(d_model, xoutdim)
-    ).to(device)
-
-    # model = nn.GRU(input_size=1000, hidden_size=128, num_layers=2, batch_first=True).to(device)
-    optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
-
     train_size = args.train_size
     train_dataset = DTWDataset(Q[:train_size,:,::step], C[:train_size,:,::step], dist[:train_size,:train_size])
     trainloader = DataLoader(train_dataset, batch_size=1, shuffle=True)
@@ -128,11 +170,28 @@ if __name__ == "__main__":
     val_dataset = DTWDataset(Q[train_size:,:,::step], C[train_size:,:,::step], dist[train_size:,train_size:])
     valloader = DataLoader(val_dataset, batch_size=1, shuffle=True)
 
-    scheduler = get_linear_schedule_with_warmup(optimizer, xwarmupepochs * len(trainloader), nepochs * len(trainloader))
+    if args.model_type == "transformer":
+        model = nn.Sequential(
+            PositionalEncoding(d_model=d_model, max_seq_length=20),
+            nn.TransformerEncoder(nn.TransformerEncoderLayer(d_model=d_model, nhead=xnhead, batch_first=True, dim_feedforward=xff), xnumlayers),
+            nn.Linear(d_model, xoutdim)
+        ).to(device)
+        optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
 
-    def embed(x):
-        return model(x).mean(dim=1)
-        # return model(x)[0][:,-1,:]
+        def embed(x):
+            return model(x).mean(dim=1)
+        
+        scheduler = get_linear_schedule_with_warmup(optimizer, xwarmupepochs * len(trainloader), nepochs * len(trainloader))
+    
+    else:
+        model = RNNEncoder(input_size=d_model, hidden_size=xoutdim).to(device)
+        optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
+
+        def embed(x):
+            return model(x)
+
+        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.9, patience=5)
+
 
     def loss_batch(q, pc, nc, pd, nd):
         q, pc, nc, pd, nd = q.to(device), pc.to(device), nc.to(device), pd.to(device), nd.to(device)
@@ -164,7 +223,8 @@ if __name__ == "__main__":
                 optimizer.zero_grad()
                 loss.backward()
                 optimizer.step()
-                scheduler.step()
+                if args.model_type == "transformer":
+                    scheduler.step()
 
                 losses.append(loss.item())
                 if epoch == 0:
@@ -180,6 +240,8 @@ if __name__ == "__main__":
                     val_losses.append(loss.item())
                     pbar.set_postfix_str(f"ES: {es}, Loss: {np.mean(losses):.6f}, Val Loss: {np.mean(val_losses):.6f}")
                 val_loss = np.mean(val_losses)
+                if args.model_type != "transformer":
+                    scheduler.step(val_loss)
 
                 if val_loss <= best_loss-1e-5:
                     best_loss = val_loss

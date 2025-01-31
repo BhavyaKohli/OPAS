@@ -1,0 +1,21 @@
+2025-01-31 14:28:35.046 | INFO     | __main__:<module>:101 - Running with args: Namespace(device=1, nolog=False, step=10, train_size=800)
+2025-01-31 14:35:04.986 | INFO     | __main__:<module>:195 - Epoch 0, Train loss: 0.844412, Val loss: 1.088959, Best val loss: 1.088959
+2025-01-31 14:39:10.005 | INFO     | __main__:<module>:195 - Epoch 1, Train loss: 0.663199, Val loss: 1.094791, Best val loss: 1.088959
+2025-01-31 14:42:26.225 | INFO     | __main__:<module>:195 - Epoch 2, Train loss: 0.645595, Val loss: 1.135052, Best val loss: 1.088959
+2025-01-31 14:45:07.733 | INFO     | __main__:<module>:195 - Epoch 3, Train loss: 0.645099, Val loss: 1.070683, Best val loss: 1.070683
+2025-01-31 14:47:33.831 | INFO     | __main__:<module>:195 - Epoch 4, Train loss: 0.790490, Val loss: 1.000000, Best val loss: 1.000000
+2025-01-31 14:49:53.489 | INFO     | __main__:<module>:195 - Epoch 5, Train loss: 1.000139, Val loss: 1.000000, Best val loss: 1.000000
+2025-01-31 14:54:19.686 | INFO     | __main__:<module>:195 - Epoch 6, Train loss: 1.000229, Val loss: 1.000000, Best val loss: 1.000000
+2025-01-31 14:58:15.498 | INFO     | __main__:<module>:195 - Epoch 7, Train loss: 0.998304, Val loss: 1.000000, Best val loss: 1.000000
+2025-01-31 15:03:40.136 | INFO     | __main__:<module>:195 - Epoch 8, Train loss: 1.000197, Val loss: 1.000000, Best val loss: 1.000000
+2025-01-31 15:08:49.464 | INFO     | __main__:<module>:195 - Epoch 9, Train loss: 1.001190, Val loss: 1.000000, Best val loss: 1.000000
+2025-01-31 15:13:53.821 | INFO     | __main__:<module>:195 - Epoch 10, Train loss: 0.999797, Val loss: 1.000000, Best val loss: 1.000000
+2025-01-31 15:19:07.983 | INFO     | __main__:<module>:195 - Epoch 11, Train loss: 1.001728, Val loss: 1.000000, Best val loss: 1.000000
+2025-01-31 15:22:47.273 | INFO     | __main__:<module>:195 - Epoch 12, Train loss: 1.000611, Val loss: 1.000000, Best val loss: 1.000000
+2025-01-31 15:27:46.321 | INFO     | __main__:<module>:195 - Epoch 13, Train loss: 1.000120, Val loss: 1.000000, Best val loss: 1.000000
+2025-01-31 15:32:22.958 | INFO     | __main__:<module>:195 - Epoch 14, Train loss: 1.001829, Val loss: 1.000000, Best val loss: 1.000000
+2025-01-31 15:37:04.049 | INFO     | __main__:<module>:195 - Epoch 15, Train loss: 1.000608, Val loss: 1.000000, Best val loss: 1.000000
+2025-01-31 15:41:40.222 | INFO     | __main__:<module>:195 - Epoch 16, Train loss: 1.001287, Val loss: 1.000000, Best val loss: 1.000000
+2025-01-31 15:46:15.198 | INFO     | __main__:<module>:195 - Epoch 17, Train loss: 0.999716, Val loss: 1.000000, Best val loss: 1.000000
+2025-01-31 15:50:49.807 | INFO     | __main__:<module>:195 - Epoch 18, Train loss: 1.001107, Val loss: 1.000000, Best val loss: 1.000000
+2025-01-31 15:54:49.559 | INFO     | __main__:<module>:197 - Early stopping: 15 (Epoch: 19), Best validation loss: 1.000000, Train loss: 0.999753
