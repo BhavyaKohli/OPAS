@@ -1,0 +1,6 @@
+2025-02-03 18:47:51.335 | INFO     | __main__:<module>:152 - Running with args: Namespace(device=0, model_type='GRU', nolog=False, step=10, train_size=3000)
+2025-02-03 18:55:32.484 | INFO     | __main__:<module>:257 - Epoch 0, Train loss: 0.591645, Val loss: 0.621664, Best val loss: 0.621664
+2025-02-03 19:03:03.812 | INFO     | __main__:<module>:257 - Epoch 1, Train loss: 0.533281, Val loss: 0.610238, Best val loss: 0.610238
+2025-02-03 19:10:37.523 | INFO     | __main__:<module>:257 - Epoch 2, Train loss: 0.523607, Val loss: 0.603551, Best val loss: 0.603551
+2025-02-03 19:18:09.340 | INFO     | __main__:<module>:257 - Epoch 3, Train loss: 0.509734, Val loss: 0.594744, Best val loss: 0.594744
+2025-02-03 19:25:40.628 | INFO     | __main__:<module>:257 - Epoch 4, Train loss: 0.482685, Val loss: 0.577805, Best val loss: 0.577805
