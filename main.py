@@ -421,6 +421,7 @@ if __name__ == '__main__':
     parser.add_argument("--skip_embed", action="store_true", help="pass to skip embed_model completely (embed_model will be replaced with nn.Identity())")
     parser.add_argument("--train_with_orig", action="store_true", help="when using the cifar or lsun datasets, pass this when training should be done using the original images and not the embeddings directly (not recommended for LSUN)")
     parser.add_argument("--deepset", action="store_true", help="pass when query and corpus sequences are to be embedded into the same latent space, for using a (hq-hc)+ loss instead of the usual sinkhorn->permutation->normscore+lamscore components")
+    parser.add_argument("--deepset_mode", type=int, default=2, help="mode 2 is normalized, mode 1 is not (only used when deepset is passed)")
     parser.add_argument("--add_attention", action="store_true", help="[unused in current script version] pass when an additional attention module is required before the Xfmer")
     parser.add_argument("--lfcc", action="store_true", help="[unused in current script version] pass when LFCC features should be used in place of audio")
 
@@ -792,8 +793,10 @@ if __name__ == '__main__':
                 netscore = 2*scoremodel(-allscores).squeeze()
             else:
                 q, c = aggregator(q), aggregator(c)
-                netscore = 2 * F.sigmoid(-F.relu(q - c).sum(dim=-1))    # normalized to 0-1, 0 for worst, 1 for best (==0 loss)
-                # netscore = -F.relu(q - c).sum(dim=-1)                 # un-normalized scores
+                if args.deepset_mode == 2:
+                    netscore = 2 * F.sigmoid(-F.relu(q - c).sum(dim=-1))    # normalized to 0-1, 0 for worst, 1 for best (==0 loss)
+                elif args.deepset_mode == 1:
+                    netscore = -F.relu(q - c).sum(dim=-1)                 # un-normalized scores
 
             pos_score = torch.atleast_1d(netscore[torch.where(l==1)])
             neg_score = netscore[torch.where(l==0)]
