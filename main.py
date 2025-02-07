@@ -159,22 +159,28 @@ def compute_metrics(dataset, model, scoremodel, embed_model, preembed_model, ima
         q = normalize(q)
         # q is (b, m, xoutdim)
         if aggregator is None:
-            qct = torch.einsum("bmd,Nnd->bNmn", q, C)
-            if args.use_linear_lammodel:
-                lambdas = []
-                for xx in range(len(q)):
-                    q_ = q[xx].unsqueeze(0)
-                    q_ = q_.repeat_interleave(C.shape[0], dim=0)
-                    lambdas_ = model(torch.cat((q_, C), dim=1).flatten(start_dim=1)).unsqueeze(-1)
-                    lambdas.append(lambdas_)
-                lambdas = torch.stack(lambdas)
+            if not NOLAMMODEL:
+                qct = torch.einsum("bmd,Nnd->bNmn", q, C)
+                if args.use_linear_lammodel:
+                    lambdas = []
+                    for xx in range(len(q)):
+                        q_ = q[xx].unsqueeze(0)
+                        q_ = q_.repeat_interleave(C.shape[0], dim=0)
+                        lambdas_ = model(torch.cat((q_, C), dim=1).flatten(start_dim=1)).unsqueeze(-1)
+                        lambdas.append(lambdas_)
+                    lambdas = torch.stack(lambdas)
+                else:
+                    model_inputs = stagger_and_concat(qct, num_stagger=stagger)
+                    if stagger==0: 
+                        model_inputs = model_inputs.squeeze(1)
+                    lambdas = torch.stack([model(x) for x in model_inputs])
+                
+                F_mat = Rm_mat.T @ (2*qct + (a_vec @ lambdas.transpose(2,3) @ A_mat).transpose(2,3))
             else:
-                model_inputs = stagger_and_concat(qct, num_stagger=stagger)
-                if stagger==0: 
-                    model_inputs = model_inputs.squeeze(1)
-                lambdas = torch.stack([model(x) for x in model_inputs])
-            
-            F_mat = Rm_mat.T @ (2*qct + (a_vec @ lambdas.transpose(2,3) @ A_mat).transpose(2,3))
+                F_mat = Rm_mat.T @ (
+                    torch.stack([-(q[i][None].unsqueeze(2) - C.unsqueeze(1)).relu().sum(-1) for i in range(len(q))])
+                )
+                lambdas = torch.ones((len(q), len(C), M, 1), device=F_mat.device)
 
             P = gumbel_sinkhorn(F_mat, CFG.tau, CFG.n_sink_iter, noise=False)
 
@@ -432,7 +438,10 @@ if __name__ == '__main__':
     # post-review
     parser.add_argument("--internal_lamwt", type=float, default=1, help="coefficient for A^T @ lambda @ a^T inside F_mat")
     parser.add_argument("--use_linear_lammodel", action="store_true", help="pass when a linear model should be used for lambda instead of a transformer")
-    parser.add_argument("--debug_mode", action="store_true", help="no logging to file")
+    parser.add_argument("--debug", action="store_true", help="no logging to file")
+
+    # new experiments
+    parser.add_argument("--no_lammodel", action="store_true", help="pass when sinkhorn matrix is to be computed without lammodel, using -relu(hq-hc)")
 
     args = parser.parse_args()
 
@@ -473,7 +482,7 @@ if __name__ == '__main__':
     else:
         raise NotImplementedError(f"Check dataset name")
 
-    if not args.debug_mode:
+    if not args.debug:
         os.makedirs(f"models/{experiment_id}/", exist_ok=True)
         print(f"Experiment information at models/{experiment_id}")
 
@@ -488,6 +497,8 @@ if __name__ == '__main__':
     logging.info("python " + " ".join(sys.argv))
     logging.info(f"Running with args: {args}")
     print(f"Running with args: {args}")
+
+    NOLAMMODEL = args.no_lammodel
 
     DEVICE = f'cuda:{args.device}' if torch.cuda.is_available() else 'cpu'
     if args.cifar or args.lsun:
@@ -507,7 +518,7 @@ if __name__ == '__main__':
 
     logging.info(f"Dataset in use : {args.dataset}")
 
-    if not args.debug_mode:
+    if not args.debug:
         import pickle
         with open(f"models/{experiment_id}/args.pkl", "wb") as f:
             pickle.dump(args, f)
@@ -766,17 +777,22 @@ if __name__ == '__main__':
             # import ipdb; ipdb.set_trace()
 
             if not DEEPSET:
-                qct = torch.einsum("bmd,bnd->bmn", q, c)
-                
-                if args.use_linear_lammodel:
-                    lambdas = model(torch.cat((q, c), dim=1).flatten(start_dim=1)).unsqueeze(-1)
-                else:
-                    model_inputs = stagger_and_concat(qct, num_stagger=stagger)
-                    if stagger==0: 
-                        model_inputs = model_inputs.squeeze(1)
-                    lambdas = model(model_inputs)
+                if not NOLAMMODEL:
+                    qct = torch.einsum("bmd,bnd->bmn", q, c)
+                    
+                    if args.use_linear_lammodel:
+                        lambdas = model(torch.cat((q, c), dim=1).flatten(start_dim=1)).unsqueeze(-1)
+                    else:
+                        model_inputs = stagger_and_concat(qct, num_stagger=stagger)
+                        if stagger==0: 
+                            model_inputs = model_inputs.squeeze(1)
+                        lambdas = model(model_inputs)
 
-                F_mat = Rm_mat.T @ (2*qct + internal_lamwt * (a_vec @ lambdas.transpose(1,2) @ A_mat).transpose(1,2))
+                    F_mat = Rm_mat.T @ (2*qct + internal_lamwt * (a_vec @ lambdas.transpose(1,2) @ A_mat).transpose(1,2))
+                else:
+                    F_mat = Rm_mat.T @ -(q.unsqueeze(2) - c.unsqueeze(1)).relu().sum(-1)
+                    lambdas = torch.ones((q.shape[0], M, 1), device=DEVICE)
+                
                 if args.single_step_norm == 1:
                     P = F_mat / F_mat.sum(dim=-2, keepdims=True)    # normalizing on the row dimension
                 elif args.single_step_norm == 2:
@@ -791,7 +807,7 @@ if __name__ == '__main__':
 
                 allscores = torch.stack([lamscore, normscore], dim=1)
                 netscore = 2*scoremodel(-allscores).squeeze()
-            else:
+            elif DEEPSET:
                 q, c = aggregator(q), aggregator(c)
                 if args.deepset_mode == 2:
                     netscore = 2 * F.sigmoid(-F.relu(q - c).sum(dim=-1))    # normalized to 0-1, 0 for worst, 1 for best (==0 loss)
@@ -840,7 +856,7 @@ if __name__ == '__main__':
             if mAP > best_val_map: 
                 best_val_map = mAP
                 val_mrr_at_best = mRR
-                if not args.debug_mode: save_models(model, scoremodel, embed_model, preembed_model, aggregator)
+                if not args.debug: save_models(model, scoremodel, embed_model, preembed_model, aggregator)
 
             if enforce_order:
                 odr = compute_odr(val_dataset, model, scoremodel, embed_model, preembed_model, stagger=stagger, verbose=False)
@@ -850,7 +866,7 @@ if __name__ == '__main__':
         else:
             mAP, mRR = 0, 0
             val_mrr_at_best = 0
-            if not args.debug_mode: save_models(model, scoremodel, embed_model, preembed_model, aggregator)
+            if not args.debug: save_models(model, scoremodel, embed_model, preembed_model, aggregator)
             
         logging.info(f"[Epoch {i:2d}|{nepochs}] loss: {np.mean(wandb_losslog):.4f}, val mAP: {mAP:.4f}, val mRR: {mRR:.4f}, best mAP: {best_val_map:.4f}, mRR @ best val mAP: {val_mrr_at_best:.4f}")
     
@@ -859,7 +875,7 @@ if __name__ == '__main__':
             wandb.log({"best val MAP": best_val_map, "best val MRR": val_mrr_at_best})
             wandb_losslog = []
 
-        if not args.debug_mode: save_models(model, scoremodel, embed_model, preembed_model, aggregator, latest=True)
+        if not args.debug: save_models(model, scoremodel, embed_model, preembed_model, aggregator, latest=True)
 
     model, scoremodel, embed_model, preembed_model, aggregator = load_models(name="best", expt_id=experiment_id, device=DEVICE)
     model.eval(), scoremodel.eval(), embed_model.eval(), preembed_model.eval()
@@ -876,5 +892,5 @@ if __name__ == '__main__':
         wandb.log({"Test MAP": mAP, "Test MRR": mRR})
     print(f"Final test metrics: mAP: {mAP:.4f}, mRR: {mRR:.4f}")
 
-    if not args.debug_mode: save_models(model, scoremodel, embed_model, preembed_model, aggregator, final=True)
+    if not args.debug: save_models(model, scoremodel, embed_model, preembed_model, aggregator, final=True)
     logging.info("*"*120+"\n"+"*"*120)
