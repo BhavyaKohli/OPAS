@@ -13,7 +13,7 @@ from datetime import datetime
 from tqdm.auto import tqdm
 
 from opas.tstok.tokenizer import Tokenizer
-from opas.utils import AttributeDict, gumbel_sinkhorn, normalize, get_opas_constants
+from opas.utils import AttributeDict, gumbel_sinkhorn, normalize, get_opas_constants, seed_everything
 from opas.data import PairDatasetTrain, PairDatasetTest
 
 from opas.models.main import LamModel, ScoreModel, PositionalEncoding
@@ -398,6 +398,8 @@ if __name__ == '__main__':
     parser.add_argument("--print_dataset", action="store_true", help="prints dataset array shapes when passed")
     parser.add_argument("--num_q", type=int, default=300, help="number of queries to be sampled from the dataset")
     parser.add_argument("--wandb_log", action="store_true", help="whether to log to wandb")
+    parser.add_argument("--seed", type=int, default=69, help="random seed")
+    parser.add_argument("--reproducible", type=int, default=1, help="pass 0 to disable reproducible training")
 
     parser.add_argument("--b", type=float, default=1.0, help="hinge margin for negative gap penalty (b-Apa)")
     parser.add_argument("--b1", type=float, default=0.0, help="hinge margin for positive gap penalty (Apa-b)")
@@ -444,6 +446,11 @@ if __name__ == '__main__':
     parser.add_argument("--no_lammodel", action="store_true", help="pass when sinkhorn matrix is to be computed without lammodel, using -relu(hq-hc)")
 
     args = parser.parse_args()
+
+    if args.reproducible:
+        os.environ["CUBLAS_WORKSPACE_CONFIG"] = ":4096:8"
+        torch.use_deterministic_algorithms(True)
+    seed_everything(args.seed)
 
     experiment_id = datetime.now().strftime("%d%m%H%M")
     args.human = args.video = args.cifar = args.lsun = False
