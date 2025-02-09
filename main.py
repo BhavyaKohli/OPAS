@@ -186,7 +186,10 @@ def compute_metrics(dataset, model, scoremodel, embed_model, preembed_model, ima
 
             RmPC = Rm_mat @ P @ C.squeeze(-1)
 
-            lamscore = lamwt * (lambdas.transpose(2,3) @ F.relu(b-A_mat @ Rm_mat @ P @ a_vec)).squeeze()
+            if args.no_lamrelu:
+                lamscore = lamwt * (lambdas.transpose(2,3) @ (b-A_mat @ Rm_mat @ P @ a_vec)).squeeze()
+            else:
+                lamscore = lamwt * (lambdas.transpose(2,3) @ F.relu(b-A_mat @ Rm_mat @ P @ a_vec)).squeeze()
             normscore = torch.norm(q.unsqueeze(1) - RmPC, dim=[-1,-2])
 
             allscores = torch.stack([lamscore, normscore], dim=2)
@@ -444,12 +447,13 @@ if __name__ == '__main__':
 
     # new experiments
     parser.add_argument("--no_lammodel", action="store_true", help="pass when sinkhorn matrix is to be computed without lammodel, using -relu(hq-hc)")
+    parser.add_argument("--no_lamrelu", action="store_true", help="pass when lamscore should not be relu'd")
 
     args = parser.parse_args()
 
     if args.reproducible:
         os.environ["CUBLAS_WORKSPACE_CONFIG"] = ":4096:8"
-        torch.use_deterministic_algorithms(True)
+        # torch.use_deterministic_algorithms(True)    #causes .backward() issues with adaptive pooling
     seed_everything(args.seed)
 
     experiment_id = datetime.now().strftime("%d%m%H%M")
@@ -809,7 +813,10 @@ if __name__ == '__main__':
 
                 RmPC = torch.einsum("mn,bnn,bnd->bmd", Rm_mat, P, c)
 
-                lamscore = lamwt * (lambdas.transpose(1,2) @ F.relu(b-A_mat @ Rm_mat @ P @ a_vec)).squeeze()
+                if args.no_lamrelu:
+                    lamscore = lamwt * (lambdas.transpose(1,2) @ (b-A_mat @ Rm_mat @ P @ a_vec)).squeeze()
+                else:
+                    lamscore = lamwt * (lambdas.transpose(1,2) @ F.relu(b-A_mat @ Rm_mat @ P @ a_vec)).squeeze()
                 normscore = torch.norm(q - RmPC, dim=[1,2])
 
                 allscores = torch.stack([lamscore, normscore], dim=1)
