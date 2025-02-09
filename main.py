@@ -448,6 +448,9 @@ if __name__ == '__main__':
     # new experiments
     parser.add_argument("--no_lammodel", action="store_true", help="pass when sinkhorn matrix is to be computed without lammodel, using -relu(hq-hc)")
     parser.add_argument("--no_lamrelu", action="store_true", help="pass when lamscore should not be relu'd")
+    parser.add_argument("--pretrain_embedding", action="store_true", help="pass when transformer encoder should be pretrained")
+    parser.add_argument("--pretrain_budget", type=float, default=0.25, help="fraction of queries and corpus to be used for pretraining")
+    parser.add_argument("--pretrain_epochs", type=int, default=30, help="number of epochs for pretraining")
 
     args = parser.parse_args()
 
@@ -459,6 +462,18 @@ if __name__ == '__main__':
     experiment_id = datetime.now().strftime("%d%m%H%M")
     args.human = args.video = args.cifar = args.lsun = False
     image_embed_model = None
+    
+    logging.info("python " + " ".join(sys.argv))
+    logging.info(f"Running with args: {args}")
+    print(f"Running with args: {args}")
+
+    NOLAMMODEL = args.no_lammodel
+
+    DEVICE = f'cuda:{args.device}' if torch.cuda.is_available() else 'cpu'
+    logging.info(f"Using device = {DEVICE}")
+    EMBED = True
+    DEEPSET = args.deepset
+
     if "audio" in args.dataset:
         experiment_id = f"A{experiment_id}" 
     elif "human" in args.dataset or "speech" in args.dataset:
@@ -472,7 +487,7 @@ if __name__ == '__main__':
         experiment_id = f"C{experiment_id}" 
         image_embed_model_ckpt = "data/image_sequence/embedding_models/cifar_ae.pkl"
         image_embed_model = Autoencoder()
-        image_embed_model.load_state_dict(torch.load(image_embed_model_ckpt))
+        image_embed_model.load_state_dict(torch.load(image_embed_model_ckpt, map_location=DEVICE))
         image_embed_model.eval()
 
         for param in image_embed_model.parameters():
@@ -484,7 +499,7 @@ if __name__ == '__main__':
 
         image_embed_model_ckpt = "data/image_sequence/embedding_models/lsun_ae.pkl"
         image_embed_model = LSUNAutoencoder()
-        image_embed_model.load_state_dict(torch.load(image_embed_model_ckpt))
+        image_embed_model.load_state_dict(torch.load(image_embed_model_ckpt, map_location=DEVICE))
         image_embed_model.eval()
 
         for param in image_embed_model.parameters():
@@ -504,20 +519,9 @@ if __name__ == '__main__':
             format="%(levelname)s (%(asctime)s): %(message)s",
             datefmt="%d/%m/%Y %I:%M:%S %p"
         )
-    
-    logging.info("python " + " ".join(sys.argv))
-    logging.info(f"Running with args: {args}")
-    print(f"Running with args: {args}")
 
-    NOLAMMODEL = args.no_lammodel
-
-    DEVICE = f'cuda:{args.device}' if torch.cuda.is_available() else 'cpu'
     if args.cifar or args.lsun:
         image_embed_model = image_embed_model.to(DEVICE)
-    logging.info(f"Using device = {DEVICE}")
-    EMBED = True
-    DEEPSET = args.deepset
-
     # CFG for sinkhorn
     CFG = AttributeDict({
         'tau': 1,
@@ -731,6 +735,83 @@ if __name__ == '__main__':
         TRANSFORM = lambda x: x
     ################ NOT USED ######################
 
+    if args.pretrain_embedding:
+        from copy import deepcopy
+        from torch.utils.data import Dataset, DataLoader
+
+        embed_model.add_module(
+            "reconstruction", 
+            nn.Sequential(
+                nn.Linear(args.xoutdim, d_model),
+                nn.ReLU(),
+                nn.Linear(d_model, d_model),
+            ).to(DEVICE)
+        )
+
+        logging.info("Pretraining embedding model")
+        qsamples = np.random.choice(range(len(train_dataset.q)), int(len(train_dataset.q) * args.pretrain_budget), replace=False)
+        csamples = np.random.choice(range(len(train_dataset.c)), int(len(train_dataset.c) * args.pretrain_budget), replace=False)
+        pretrain_q = torch.from_numpy(train_dataset.q[qsamples])
+        pretrain_c = torch.from_numpy(train_dataset.c[csamples])
+
+        class PairDatasetPretrain(Dataset):
+            def __init__(self, q, c):
+                self.q = q
+                self.c = c
+
+            def __len__(self):
+                return len(self.q) * len(self.c)
+
+            def __getitem__(self, idx):
+                id1 = idx // len(self.c)
+                id2 = idx % len(self.c)
+                return self.q[id1], self.c[id2]
+
+        pretrain_dataset = PairDatasetPretrain(pretrain_q, pretrain_c)
+        pretrain_loader = DataLoader(pretrain_dataset, batch_size=800, shuffle=True, num_workers=8)
+
+        bestloss = 10
+        bestwts = None
+        es = 0
+        pbar = tqdm(range(1,args.pretrain_epochs+1,1), disable=False)
+        for epoch in pbar:
+            eloss = []
+            for q, c in tqdm(pretrain_loader, leave=False):
+                q, c = q.to(DEVICE), c.to(DEVICE)
+                q = q + batch_get_white_noise(q, args.SNR)
+                qorig, corig = embed_if_image_and_normalize(q, image_embed_model), embed_if_image_and_normalize(c, image_embed_model)
+
+                q, c = embed_model(preembed_model(qorig)), embed_model(preembed_model(corig))
+                q, c = normalize(q, c)
+                loss = F.mse_loss(qorig, q) + F.mse_loss(corig, c)
+                
+                embed_optimizer.zero_grad()
+                if args.preembed != "tokenize": 
+                    preembed_optimizer.zero_grad()
+                loss.backward()
+                embed_optimizer.step()
+                if args.preembed != "tokenize": 
+                    preembed_optimizer.step()
+                scheduler.step()
+
+                pbar.set_postfix_str(f"loss: {loss:.4f}, bestloss: {bestloss:.4f}, es: {es}")
+                eloss.append(loss.item())
+
+            if np.mean(eloss) <= bestloss:
+                bestloss = np.mean(eloss)
+                bestwts = deepcopy(embed_model.state_dict())
+            else:
+                es += 1
+                if es >= 5:
+                    break
+
+        logging.info(f"Pretraining done")
+        embed_model.load_state_dict(bestwts)
+        embed_model.reconstruction = nn.Identity()
+        embed_model.eval()
+        for param in embed_model.parameters():
+            param.requires_grad = False
+
     losslog = []
 
     logging.info("Training\n"+"*"*120+"\n"+"*"*120)
@@ -839,7 +920,8 @@ if __name__ == '__main__':
 
             optimizer.zero_grad()
             sc_optimizer.zero_grad()
-            embed_optimizer.zero_grad()
+            if not args.pretrain_embedding:
+                embed_optimizer.zero_grad()
             if args.preembed != "tokenize": 
                 preembed_optimizer.zero_grad()
             if DEEPSET:
@@ -847,12 +929,13 @@ if __name__ == '__main__':
             loss.backward()
             optimizer.step()
             sc_optimizer.step()
-            embed_optimizer.step()
+            if not args.pretrain_embedding:
+                embed_optimizer.step()
+                scheduler.step()
             if args.preembed != "tokenize": 
                 preembed_optimizer.step()
             if DEEPSET:
                 aggregator_optimizer.step()
-            scheduler.step()
 
             pbar.set_postfix_str(f"loss: {loss:.4f}")
             wandb_losslog.append(loss.item())
