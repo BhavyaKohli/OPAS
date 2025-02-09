@@ -453,6 +453,7 @@ if __name__ == '__main__':
     parser.add_argument("--pretrain_epochs", type=int, default=30, help="number of epochs for pretraining")
 
     args = parser.parse_args()
+    DEVICE = f'cuda:{args.device}' if torch.cuda.is_available() else 'cpu'
 
     if args.reproducible:
         os.environ["CUBLAS_WORKSPACE_CONFIG"] = ":4096:8"
@@ -462,18 +463,6 @@ if __name__ == '__main__':
     experiment_id = datetime.now().strftime("%d%m%H%M")
     args.human = args.video = args.cifar = args.lsun = False
     image_embed_model = None
-    
-    logging.info("python " + " ".join(sys.argv))
-    logging.info(f"Running with args: {args}")
-    print(f"Running with args: {args}")
-
-    NOLAMMODEL = args.no_lammodel
-
-    DEVICE = f'cuda:{args.device}' if torch.cuda.is_available() else 'cpu'
-    logging.info(f"Using device = {DEVICE}")
-    EMBED = True
-    DEEPSET = args.deepset
-
     if "audio" in args.dataset:
         experiment_id = f"A{experiment_id}" 
     elif "human" in args.dataset or "speech" in args.dataset:
@@ -519,9 +508,19 @@ if __name__ == '__main__':
             format="%(levelname)s (%(asctime)s): %(message)s",
             datefmt="%d/%m/%Y %I:%M:%S %p"
         )
+    
+    logging.info("python " + " ".join(sys.argv))
+    logging.info(f"Running with args: {args}")
+    print(f"Running with args: {args}")
+
+    NOLAMMODEL = args.no_lammodel
 
     if args.cifar or args.lsun:
         image_embed_model = image_embed_model.to(DEVICE)
+    logging.info(f"Using device = {DEVICE}")
+    EMBED = True
+    DEEPSET = args.deepset
+
     # CFG for sinkhorn
     CFG = AttributeDict({
         'tau': 1,
@@ -768,7 +767,7 @@ if __name__ == '__main__':
                 return self.q[id1], self.c[id2]
 
         pretrain_dataset = PairDatasetPretrain(pretrain_q, pretrain_c)
-        pretrain_loader = DataLoader(pretrain_dataset, batch_size=800, shuffle=True, num_workers=8)
+        pretrain_loader = DataLoader(pretrain_dataset, batch_size=800, shuffle=True, num_workers=16)
 
         bestloss = 10
         bestwts = None
