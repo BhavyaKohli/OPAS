@@ -429,7 +429,6 @@ if __name__ == '__main__':
     parser.add_argument("--use_sing_xfmer", action="store_true", help="pass when a single transformer is to be used, for both q and c")
     parser.add_argument("--no_tokenize", action="store_true", help="pass when transformer pre-inputs should NOT be tokenized")
     parser.add_argument("--enforce_order", action="store_true", help="pass when enforce order during training")
-    parser.add_argument("--skip_embed", action="store_true", help="pass to skip embed_model completely (embed_model will be replaced with nn.Identity())")
     parser.add_argument("--train_with_orig", action="store_true", help="when using the cifar or lsun datasets, pass this when training should be done using the original images and not the embeddings directly (not recommended for LSUN)")
     parser.add_argument("--deepset", action="store_true", help="pass when query and corpus sequences are to be embedded into the same latent space, for using a (hq-hc)+ loss instead of the usual sinkhorn->permutation->normscore+lamscore components")
     parser.add_argument("--deepset_mode", type=int, default=2, help="mode 2 is normalized, mode 1 is not (only used when deepset is passed)")
@@ -451,6 +450,8 @@ if __name__ == '__main__':
     parser.add_argument("--pretrain_embedding", action="store_true", help="pass when transformer encoder should be pretrained")
     parser.add_argument("--pretrain_budget", type=float, default=0.25, help="fraction of queries and corpus to be used for pretraining")
     parser.add_argument("--pretrain_epochs", type=int, default=30, help="number of epochs for pretraining")
+    parser.add_argument("--skip_embed", action="store_true", help="pass to skip embed_model completely (embed_model will be replaced with nn.Identity())")
+    parser.add_argument("--skip_type", type=str, default="lin", help="type of model to use (lin, conv, lstm)")
 
     args = parser.parse_args()
     DEVICE = f'cuda:{args.device}' if torch.cuda.is_available() else 'cpu'
@@ -686,16 +687,23 @@ if __name__ == '__main__':
 
     if args.skip_embed:
         d_model = args.xoutdim
-        lin_transform = nn.Sequential(
-            nn.Linear(samp_rate, d_model),
-            nn.ReLU(),
-            nn.Linear(d_model, d_model),
-        )
+        
+        if args.skip_type == "lin":
+            skip_transform = nn.Sequential(
+                nn.Linear(samp_rate, d_model),
+                nn.ReLU(),
+                nn.Linear(d_model, d_model),
+            )
+        elif args.skip_type == "conv":
+            skip_transform = Conv1dTS(n_ch=4, latent=d_model)
+        else:
+            raise NotImplementedError(f"Skip type {args.skip_type} not implemented")
+        
         args.no_tokenize = True     # turn off input tokenization
         with open(f"models/{experiment_id}/args.pkl", "wb") as f:
             pickle.dump(args, f)
 
-        embed_model = TransformInput(lin_transform)
+        embed_model = TransformInput(skip_transform)
         embed_model = embed_model.to(DEVICE)
         preembed_model = TransformInput(nn.Identity())
         preembed_model.dummy_param = nn.Parameter(torch.empty(20), requires_grad=True)
