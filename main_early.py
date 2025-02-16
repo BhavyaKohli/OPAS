@@ -682,7 +682,6 @@ if __name__ == '__main__':
         #         _, _ = compute_metrics_early_interaction(val_dataset, model, scoremodel, embed_model, embed_model_inner, preembed_model, image_embed_model=image_embed_model, stagger=stagger, verbose=True, aggregator=aggregator)
         
         model.train(), scoremodel.train(), embed_model.train(), preembed_model.train(), embed_model_inner.train()
-        import ipdb; ipdb.set_trace()
         if DEEPSET:
             aggregator.train()
 
@@ -763,7 +762,7 @@ if __name__ == '__main__':
 
 
         # validation metrics and logging
-        model.eval(), scoremodel.eval(), embed_model.eval(), preembed_model.eval()
+        model.eval(), scoremodel.eval(), embed_model.eval(), embed_model_inner.eval(), preembed_model.eval()
         if DEEPSET:
             aggregator.eval()
         if not args.use_sing_xfmer:
