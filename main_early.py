@@ -290,6 +290,7 @@ def load_models(name="best", expt_id=None, device="cpu"):
     model = torch.load(f"models/{expt_id}/model{suffix}.pt", map_location=device)
     scoremodel = torch.load(f"models/{expt_id}/scmodel{suffix}.pt", map_location=device)
     embed_model = torch.load(f"models/{expt_id}/embed_model{suffix}.pt", map_location=device)
+    embed_model_inner = torch.load(f"models/{expt_id}/embed_model_inner{suffix}.pt", map_location=device)
     if os.path.exists(f"models/{expt_id}/preembed_model{suffix}.pt"):
         preembed_model = torch.load(f"models/{expt_id}/preembed_model{suffix}.pt", map_location=device)
     else:
@@ -301,7 +302,7 @@ def load_models(name="best", expt_id=None, device="cpu"):
     else:
         aggregator = None
 
-    return model, scoremodel, embed_model, preembed_model, aggregator
+    return model, scoremodel, embed_model, embed_model_inner, preembed_model, aggregator
 
 
 if __name__ == '__main__':
@@ -681,6 +682,7 @@ if __name__ == '__main__':
         #         _, _ = compute_metrics_early_interaction(val_dataset, model, scoremodel, embed_model, embed_model_inner, preembed_model, image_embed_model=image_embed_model, stagger=stagger, verbose=True, aggregator=aggregator)
         
         model.train(), scoremodel.train(), embed_model.train(), preembed_model.train(), embed_model_inner.train()
+        import ipdb; ipdb.set_trace()
         if DEEPSET:
             aggregator.train()
 
@@ -780,7 +782,7 @@ if __name__ == '__main__':
         else:
             mAP, mRR = 0, 0
             val_mrr_at_best = 0
-            if not args.debug: save_models(model, scoremodel, embed_model, preembed_model, aggregator)
+            if not args.debug: save_models(model, scoremodel, embed_model, embed_model_inner, preembed_model, aggregator)
             
         logging.info(f"[Epoch {i:2d}|{nepochs}] loss: {np.mean(wandb_losslog):.4f}, val mAP: {mAP:.4f}, val mRR: {mRR:.4f}, best mAP: {best_val_map:.4f}, mRR @ best val mAP: {val_mrr_at_best:.4f}")
     
@@ -789,9 +791,9 @@ if __name__ == '__main__':
             wandb.log({"best val MAP": best_val_map, "best val MRR": val_mrr_at_best})
             wandb_losslog = []
 
-        if not args.debug: save_models(model, scoremodel, embed_model, preembed_model, aggregator, latest=True)
+        if not args.debug: save_models(model, scoremodel, embed_model, embed_model_inner, preembed_model, aggregator, latest=True)
 
-    model, scoremodel, embed_model, preembed_model, aggregator = load_models(name="best", expt_id=experiment_id, device=DEVICE)
+    model, scoremodel, embed_model, embed_model_inner, preembed_model, aggregator = load_models(name="best", expt_id=experiment_id, device=DEVICE)
     model.eval(), scoremodel.eval(), embed_model.eval(), preembed_model.eval()
     if DEEPSET:
         aggregator.eval()
@@ -806,5 +808,5 @@ if __name__ == '__main__':
         wandb.log({"Test MAP": mAP, "Test MRR": mRR})
     print(f"Final test metrics: mAP: {mAP:.4f}, mRR: {mRR:.4f}")
 
-    if not args.debug: save_models(model, scoremodel, embed_model, preembed_model, aggregator, final=True)
+    if not args.debug: save_models(model, scoremodel, embed_model, embed_model_inner, preembed_model, aggregator, final=True)
     logging.info("*"*120+"\n"+"*"*120)
