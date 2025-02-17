@@ -365,7 +365,7 @@ if __name__ == '__main__':
     parser.add_argument("--skip_type", type=str, default="lin", help="type of model to use (lin, conv, lstm)")
 
     # early interaction specific arguments
-    parser.add_argument("--early_interaction_steps", type=int, default=5, help="number of early interaction steps (T)")
+    parser.add_argument("--early_interaction_steps", type=int, default=3, help="number of early interaction steps (T)")
 
     args = parser.parse_args()
     DEVICE = f'cuda:{args.device}' if torch.cuda.is_available() else 'cpu'
