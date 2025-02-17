@@ -771,7 +771,7 @@ if __name__ == '__main__':
             if mAP > best_val_map: 
                 best_val_map = mAP
                 val_mrr_at_best = mRR
-                if not args.debug: save_models(model, scoremodel, embed_model, preembed_model, aggregator)
+                if not args.debug: save_models(model, scoremodel, embed_model, embed_model_inner, preembed_model, aggregator)
 
             if enforce_order:
                 odr = compute_odr(val_dataset, model, scoremodel, embed_model, preembed_model, stagger=stagger, verbose=False)
