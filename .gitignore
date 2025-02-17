@@ -1,0 +1,14 @@
+final_data/*
+colab_notebooks/
+models/*
+baselines/tensors/*.pt
+
+__pycache__/*
+__pycache__/
+
+!README.md
+
+nb_*
+tmp/
+
+*.pkl
