@@ -198,7 +198,7 @@ def compute_metrics_early_interaction(dataset, model, scoremodel, embed_model, e
                 q_ = normalize(q_)
 
                 # c update
-                c_ = embed_model_inner[1](torch.cat((c_, PtRmtQ), dim=-1))
+                c_ = embed_model_inner[0](torch.cat((c_, PtRmtQ), dim=-1))
                 c_ = normalize(c_)
 
                 F_mat, lambdas[xx] = get_F_mat_lam(q_, c_, model)        # compute F_t, lambdas_t      
@@ -711,7 +711,7 @@ if __name__ == '__main__':
                 q = normalize(q)
 
                 # c update
-                c = embed_model_inner[1](torch.cat((c, PtRmtQ), dim=-1))
+                c = embed_model_inner[0](torch.cat((c, PtRmtQ), dim=-1))
                 c = normalize(c)
 
                 F_mat, lambdas = get_F_mat_lam(q, c, model)        # compute F_t, lambdas_t      
@@ -805,7 +805,7 @@ if __name__ == '__main__':
     logging.info(f"Final test metrics: mAP: {mAP:.4f}, mRR: {mRR:.4f}")
     if args.wandb_log: 
         wandb.log({"Test MAP": mAP, "Test MRR": mRR})
-    print(f"Final test metrics: mAP: {mAP:.4f}, mRR: {mRR:.4f}")
+    print(f"Final test metrics: MAP,MRR: {mAP:.4f},{mRR:.4f}")
 
     if not args.debug: save_models(model, scoremodel, embed_model, embed_model_inner, preembed_model, aggregator, final=True)
     logging.info("*"*120+"\n"+"*"*120)
