@@ -377,17 +377,17 @@ def load_models(name="best", expt_id=None, device="cpu"):
     
     print(f"Loading `{name}` model")
 
-    model = torch.load(f"models/{expt_id}/model{suffix}.pt", map_location=device)
-    scoremodel = torch.load(f"models/{expt_id}/scmodel{suffix}.pt", map_location=device)
-    embed_model = torch.load(f"models/{expt_id}/embed_model{suffix}.pt", map_location=device)
+    model = torch.load(f"models/{expt_id}/model{suffix}.pt", map_location=device, weights_only=False)
+    scoremodel = torch.load(f"models/{expt_id}/scmodel{suffix}.pt", map_location=device, weights_only=False)
+    embed_model = torch.load(f"models/{expt_id}/embed_model{suffix}.pt", map_location=device, weights_only=False)
     if os.path.exists(f"models/{expt_id}/preembed_model{suffix}.pt"):
-        preembed_model = torch.load(f"models/{expt_id}/preembed_model{suffix}.pt", map_location=device)
+        preembed_model = torch.load(f"models/{expt_id}/preembed_model{suffix}.pt", map_location=device, weights_only=False)
     else:
         tokenize_transform = lambda x: tokenize(x, args)[0]
         preembed_model = TransformInput(tokenize_transform).to(device)
     
     if os.path.exists(f"models/{expt_id}/aggregator{suffix}.pt"):
-        aggregator = torch.load(f"models/{expt_id}/aggregator{suffix}.pt", map_location=device)
+        aggregator = torch.load(f"models/{expt_id}/aggregator{suffix}.pt", map_location=device, weights_only=False)
     else:
         aggregator = None
 
