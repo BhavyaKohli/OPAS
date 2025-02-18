@@ -1,4 +1,3 @@
-import wandb
 import numpy as np
 import h5py
 import logging
@@ -526,6 +525,7 @@ if __name__ == '__main__':
     ####################
 
     if args.wandb_log : 
+        import wandb
         wandb.init(
             # set the wandb project where this run will be logged
             project = "Opas - Experiments",

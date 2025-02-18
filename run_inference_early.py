@@ -1,6 +1,6 @@
 import os
 
-from main import *
+from main_early import *
 from opas.utils import get_opas_constants
 
 

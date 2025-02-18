@@ -10,5 +10,6 @@ if __name__ == "__main__":
     script = "run_inference_early.py" if early else "run_inference.py"
 
     for expt_id in expt_ids:
-        ret = subprocess.run(f"python {script} --device {device} --expt_id {expt_id} --dataset {dataset}", shell=True)
-        print(ret)
+        ret = os.system(f"python {script} --device {device} --expt_id {expt_id} --dataset {dataset}")
+        if ret == 2:
+            break
