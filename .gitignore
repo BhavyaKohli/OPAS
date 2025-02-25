@@ -12,3 +12,11 @@ nb_*
 tmp/
 
 *.pkl
+
+*gt/
+*.log
+*.hdf5
+
+# links
+*gt
+audio_processed

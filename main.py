@@ -1,4 +1,3 @@
-import wandb
 import numpy as np
 import h5py
 import logging
@@ -609,7 +608,8 @@ if __name__ == '__main__':
     internal_lamwt = getattr(args, "internal_lamwt", 1)
     ####################
 
-    if args.wandb_log : 
+    if args.wandb_log:
+        import wandb 
         wandb.init(
             # set the wandb project where this run will be logged
             project = "Opas - Experiments",
