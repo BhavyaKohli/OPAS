@@ -326,6 +326,7 @@ if __name__ == '__main__':
         spec_conf = OmegaConf.merge(spec_conf, extra)
 
     base_conf = OmegaConf.load("configs/base.yaml")
+    base_conf = OmegaConf.merge(base_conf, OmegaConf.load("configs/early.yaml"))
     main_conf = OmegaConf.merge(base_conf, spec_conf, cli_conf)
     args = argparse.Namespace(**main_conf)    
 
