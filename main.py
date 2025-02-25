@@ -160,7 +160,7 @@ def compute_metrics(dataset, model, scoremodel, embed_model, preembed_model, ima
         # q is (b, m, xoutdim)
         if aggregator is None:
             if not NOLAMMODEL:
-                qct = torch.einsum("bmd,Nnd->bNmn", q, C)
+                qct = torch.einsum("bmd,Nnd->bNmn", q, C)   # verified
                 if args.use_linear_lammodel:
                     lambdas = []
                     for xx in range(len(q)):
@@ -245,7 +245,7 @@ def compute_metrics_sing(dataset, model, scoremodel, embed_model, preembed_model
             q, c = qc[:, :M], qc[:, M:]
             q, c = normalize(q, c)
 
-            qct = torch.einsum("bmd,bnd->bmn", q, c)
+            qct = torch.einsum("bmd,bnd->bmn", q, c)    # verified
             model_inputs = stagger_and_concat(qct, num_stagger=stagger)
             
             lambdas = model(model_inputs)
@@ -253,7 +253,8 @@ def compute_metrics_sing(dataset, model, scoremodel, embed_model, preembed_model
             F_mat = Rm_mat.T @ (2*qct + (a_vec @ lambdas.transpose(1,2) @ A_mat).transpose(1,2))
 
             P = gumbel_sinkhorn(F_mat, CFG.tau, CFG.n_sink_iter, noise=False)
-            RmPC = torch.einsum("mn,bnn,bnd->bmd", Rm_mat, P, c)
+            # RmPC = torch.einsum("mn,bnn,bnd->bmd", Rm_mat, P, c)    # sanity fail
+            RmPC = Rm_mat @ torch.bmm(P, c)
 
             lamscore = lamwt * (lambdas.transpose(1,2) @ F.relu(b-A_mat @ Rm_mat @ P @ a_vec)).squeeze()
             normscore = torch.norm(q - RmPC, dim=[1,2])
@@ -308,7 +309,7 @@ def compute_odr(dataset, model, scoremodel, embed_model, preembed_model, image_e
         q = normalize(q)
         # q is (b, m, xoutdim)
 
-        qct = torch.einsum("bmd,Nnd->bNmn", q, true_c)
+        qct = torch.einsum("bmd,Nnd->bNmn", q, true_c)  # verified
         model_inputs = stagger_and_concat(qct, num_stagger=stagger) # bNsmn  s = num_stagger+1
 
         lambdas = torch.stack([model(x) for x in model_inputs])
@@ -865,7 +866,8 @@ if __name__ == '__main__':
                 else:
                     P = gumbel_sinkhorn(F_mat, CFG.tau, CFG.n_sink_iter, noise=False)
 
-                RmPC = torch.einsum("mn,bnn,bnd->bmd", Rm_mat, P, c)
+                # RmPC = torch.einsum("mn,bnn,bnd->bmd", Rm_mat, P, c)  # sanity fail
+                RmPC = Rm_mat @ torch.bmm(P, c)
 
                 if args.no_lamrelu:
                     lamscore = lamwt * (lambdas.transpose(1,2) @ (b-A_mat @ Rm_mat @ P @ a_vec)).squeeze()
