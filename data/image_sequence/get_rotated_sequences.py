@@ -43,15 +43,16 @@ def embed(model, x):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('--dataset_name', type=str, choices=["CIFAR", "LSUN"])
-    parser.add_argument('--autoencoder_weights', type=str, help="Path to autoencoder weights, stored in ./embedding_models by default if using `train_ae.py` script")
+    parser.add_argument('--ae_weights', type=str, help="Path to autoencoder weights, stored in ./embedding_models by default if using `train_ae.py` script")
     parser.add_argument('--device', type=int, default=-1, help="Cuda device index, pass -1 to run on cpu (not recommended)")
+    parser.add_argument('--seq_len', type=int, default=20, help="Length of sequence (default 20)")
     args = parser.parse_args()
 
     DEVICE = f"cuda:{args.device}" if torch.cuda.is_available() and args.device != -1 else "cpu"
-    LSUN_ROOT = "../lsun_gt/"
-    CIFAR_ROOT = "../cifar_gt/"
+    LSUN_ROOT = "lsun_gt/"
+    CIFAR_ROOT = "cifar_gt/"
 
-    embed_model_ckpt = torch.load(args.autoencoder_weights)
+    embed_model_ckpt = torch.load(args.ae_weights)
     if args.dataset_name == "CIFAR":
         embed_model = Autoencoder()
     elif args.dataset_name == "LSUN":
@@ -103,7 +104,8 @@ if __name__ == "__main__":
         time.sleep(2)
         os.remove(dataset_save_path)
 
-    ANGLES = np.linspace(0,180,20,endpoint=True)
+    maxlim = 180 if args.seq_len <= 20 else 270
+    ANGLES = np.linspace(0, maxlim, args.seq_len, endpoint=True)
     for split, dset in zip(["train", "val", "test"], [train_samples, val_samples, test_samples]):
         data, _ = dset
         data = torch.from_numpy(data)
