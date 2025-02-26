@@ -29,6 +29,8 @@ from functools import partial
 import torchaudio.transforms as T
 
 
+tqdm = partial(tqdm, ncols=150)
+
 def get_tokenizer():
     data_config = AttributeDict({
         "max_seq_len": 160,
@@ -143,7 +145,7 @@ def embed_full_corpus(dataset, embed_model, preembed_model, image_embed_model=No
 @torch.no_grad()
 def compute_metrics(dataset, model, scoremodel, embed_model, preembed_model, image_embed_model=None, stagger=2, verbose=False, aggregator=None):
 
-    loader = dataset.get_dataloader(batch_size=200, shuffle=True)
+    loader = dataset.get_dataloader(batch_size=150, shuffle=True)
 
     C = embed_full_corpus(dataset, embed_model, preembed_model, image_embed_model=image_embed_model, aggregator=aggregator)
     # C is (N, n, xoutdim)
@@ -194,6 +196,7 @@ def compute_metrics(dataset, model, scoremodel, embed_model, preembed_model, ima
 
             allscores = torch.stack([lamscore, normscore], dim=2)
             netscore = 2*scoremodel(-allscores).squeeze()      # b
+            del P, F_mat, RmPC, q, qct
 
         else:
             q = aggregator(q)
@@ -812,7 +815,6 @@ if __name__ == '__main__':
             q = torch.cat((q, qpos), dim=0).to(DEVICE)
             c = torch.cat((c, cpos), dim=0).to(DEVICE)
             l = torch.cat((l, lpos), dim=0)
-
             if enforce_order:
                 qneg = []   # shuffled
                 cneg = []   # repeats
