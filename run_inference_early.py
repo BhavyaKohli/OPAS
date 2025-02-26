@@ -55,8 +55,10 @@ def compute_metrics_early_interaction(dataset, model, scoremodel, embed_model, e
             q_ = q_.repeat_interleave(c_.shape[0], dim=0)
 
             for t in range(args.early_interaction_steps):
-                RmPC = torch.einsum("mn,bnn,bnd->bmd", Rm_mat, P[xx], c_)
-                PtRmtQ = torch.einsum("bnn,nm,bmd->bnd", P[xx].transpose(-1,-2), Rm_mat.T, q_)
+                # RmPC = torch.einsum("mn,bnn,bnd->bmd", Rm_mat, P[xx], c_)   # sanity fail
+                RmPC = Rm_mat @ torch.bmm(P[xx], c_)
+                # PtRmtQ = torch.einsum("bnn,nm,bmd->bnd", P[xx].transpose(-1,-2), Rm_mat.T, q_)
+                PtRmtQ = torch.bmm(P[xx].transpose(-1,-2), Rm_mat.T @ q_)
 
                 # q update
                 q_ = embed_model_inner[0](torch.cat((q_, RmPC), dim=-1))
