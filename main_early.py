@@ -28,6 +28,8 @@ from functools import partial
 
 import torchaudio.transforms as T
 
+tqdm = partial(tqdm, ncols=150)
+
 
 def get_tokenizer():
     data_config = AttributeDict({
