@@ -178,6 +178,7 @@ def compute_metrics(dataset, model, scoremodel, embed_model, preembed_model, ima
                     lambdas = torch.stack([model(x) for x in model_inputs])
                 
                 F_mat = Rm_mat.T @ (2*qct + (a_vec @ lambdas.transpose(2,3) @ A_mat).transpose(2,3))
+                del qct
             else:
                 F_mat = Rm_mat.T @ (
                     torch.stack([-(q[i][None].unsqueeze(2) - C.unsqueeze(1)).relu().sum(-1) for i in range(len(q))])
@@ -196,7 +197,7 @@ def compute_metrics(dataset, model, scoremodel, embed_model, preembed_model, ima
 
             allscores = torch.stack([lamscore, normscore], dim=2)
             netscore = 2*scoremodel(-allscores).squeeze()      # b
-            del P, F_mat, RmPC, q, qct
+            del P, F_mat, RmPC, q
 
         else:
             q = aggregator(q)
