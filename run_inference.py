@@ -75,9 +75,9 @@ def compute_metrics(dataset, model, scoremodel, embed_model, preembed_model, ima
     return mAP, mRR
 
 
-def load_models(name="best", expt_id=None, device="cpu"):
-    if expt_id is None:
-        expt_id = experiment_id
+def load_models(name="best", expt_root=None, device="cpu"):
+    if expt_root is None:
+        raise ValueError("Please provide a valid experiment root folder in the inference script")
 
     if name not in ["best", "last", "latest"]:
         raise NotImplementedError("Only `best`, `last`, and `latest` models are supported")
@@ -89,17 +89,17 @@ def load_models(name="best", expt_id=None, device="cpu"):
     
     print(f"Loading `{name}` model")
 
-    model = torch.load(f"models/{expt_id}/model{suffix}.pt", map_location=device, weights_only=False)
-    scoremodel = torch.load(f"models/{expt_id}/scmodel{suffix}.pt", map_location=device, weights_only=False)
-    embed_model = torch.load(f"models/{expt_id}/embed_model{suffix}.pt", map_location=device, weights_only=False)
-    if os.path.exists(f"models/{expt_id}/preembed_model{suffix}.pt"):
-        preembed_model = torch.load(f"models/{expt_id}/preembed_model{suffix}.pt", map_location=device, weights_only=False)
+    model = torch.load(f"{expt_root}/model{suffix}.pt", map_location=device, weights_only=False)
+    scoremodel = torch.load(f"{expt_root}/scmodel{suffix}.pt", map_location=device, weights_only=False)
+    embed_model = torch.load(f"{expt_root}/embed_model{suffix}.pt", map_location=device, weights_only=False)
+    if os.path.exists(f"{expt_root}/preembed_model{suffix}.pt"):
+        preembed_model = torch.load(f"{expt_root}/preembed_model{suffix}.pt", map_location=device, weights_only=False)
     else:
         tokenize_transform = lambda x: tokenize(x, args)[0]
         preembed_model = TransformInput(tokenize_transform).to(device)
     
-    if os.path.exists(f"models/{expt_id}/aggregator{suffix}.pt"):
-        aggregator = torch.load(f"models/{expt_id}/aggregator{suffix}.pt", map_location=device, weights_only=False)
+    if os.path.exists(f"{expt_root}/aggregator{suffix}.pt"):
+        aggregator = torch.load(f"{expt_root}/aggregator{suffix}.pt", map_location=device, weights_only=False)
     else:
         aggregator = None
 
@@ -111,10 +111,13 @@ if __name__ == "__main__":
     parser.add_argument("--expt_id", type=str, help="Experiment ID to load models from")
     parser.add_argument("--dataset", type=str, required=True, help="name of dataset, stored in `final_data/`")
     parser.add_argument("--device", type=str, default=-1, help="gpu id to run on,  pass -1 to run on cpu")
+    parser.add_argument("--old", action="store_true", help="use old model checkpoint folder")
     args = parser.parse_args()
 
     experiment_id = args.expt_id
-    expt_root = f"models/{experiment_id}/"
+    folder = "models" if not args.old else "models_old"
+    expt_root = f"{folder}/{experiment_id}/"
+
     dataset = args.dataset
     DEVICE = f"cuda:{args.device}" if torch.cuda.is_available() and args.device != -1 else "cpu"
     
@@ -122,7 +125,7 @@ if __name__ == "__main__":
     with open(os.path.join(expt_root, "args.pkl"), "rb") as file:
         args = pickle.load(file)
 
-    model, scoremodel, embed_model, preembed_model, aggregator = load_models(name="best", expt_id=experiment_id, device=DEVICE)
+    model, scoremodel, embed_model, preembed_model, aggregator = load_models(name="best", expt_root=expt_root, device=DEVICE)
     model.eval(), scoremodel.eval(), embed_model.eval(), preembed_model.eval()
     if aggregator is not None:
         aggregator.eval()
