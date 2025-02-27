@@ -2,6 +2,7 @@ final_data/*
 colab_notebooks/
 models/*
 models_/
+models_old/
 baselines/tensors/*.pt
 
 __pycache__/*
