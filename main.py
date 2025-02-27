@@ -961,10 +961,10 @@ if __name__ == '__main__':
     else:
         mAP, mRR = compute_metrics(test_dataset, model, scoremodel, embed_model, preembed_model, image_embed_model=image_embed_model, stagger=stagger, verbose=True, aggregator=aggregator)
     
-    logging.info(f"Final test metrics: mAP: {mAP:.4f}, mRR: {mRR:.4f}")
+    logging.info(f"Final test metrics: MAP,MRR: {mAP:.4f},{mRR:.4f}")
     if args.wandb_log: 
         wandb.log({"Test MAP": mAP, "Test MRR": mRR})
-    print(f"Final test metrics: mAP: {mAP:.4f}, mRR: {mRR:.4f}")
+    print(f"Final test metrics: MAP,MRR: {mAP:.4f},{mRR:.4f}")
 
     if not args.debug: save_models(model, scoremodel, embed_model, preembed_model, aggregator, final=True)
     logging.info("*"*120+"\n"+"*"*120)
