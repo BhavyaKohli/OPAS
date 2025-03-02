@@ -31,7 +31,7 @@ def compute_metrics_early_interaction(dataset, model, scoremodel, embed_model, e
             lambdas = torch.ones((len(q), len(C), M, 1), device=F_mat.device)
         return F_mat, lambdas
 
-    loader = dataset.get_dataloader(batch_size=200, shuffle=True)
+    loader = dataset.get_dataloader(batch_size=100, shuffle=True)
     C = embed_full_corpus(dataset, embed_model, preembed_model, image_embed_model=image_embed_model, aggregator=aggregator)
     # C is (N, n, xoutdim)
 
@@ -222,8 +222,8 @@ if __name__ == "__main__":
     lamwt = args.lamwt    # loss coefficient for negative gap penalty
     gapwt = args.gapwt       # loss coefficient for positive gap penalty
     internal_lamwt = getattr(args, "internal_lamwt", 1)
-    M = 6
-    N = 20
+    M = test_dataset.q[0].shape[0]
+    N = test_dataset.c[0].shape[0]
     ####################
 
     A_mat, a_vec, Rm_mat = get_opas_constants(M, N, DEVICE)

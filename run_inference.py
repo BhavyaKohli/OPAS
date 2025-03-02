@@ -7,7 +7,7 @@ from opas.utils import get_opas_constants
 @torch.no_grad()
 def compute_metrics(dataset, model, scoremodel, embed_model, preembed_model, image_embed_model=None, stagger=2, verbose=False, aggregator=None):
 
-    loader = dataset.get_dataloader(batch_size=200, shuffle=True)
+    loader = dataset.get_dataloader(batch_size=100, shuffle=True)
 
     C = embed_full_corpus(dataset, embed_model, preembed_model, image_embed_model=image_embed_model, aggregator=aggregator)
     # C is (N, n, xoutdim)
@@ -175,8 +175,8 @@ if __name__ == "__main__":
     stagger = args.stagger
     lamwt = args.lamwt    # loss coefficient for negative gap penalty
     gapwt = args.gapwt       # loss coefficient for positive gap penalty
-    M = 6
-    N = 20
+    M = test_dataset.q[0].shape[0]
+    N = test_dataset.c[0].shape[0]
     ####################
 
     A_mat, a_vec, Rm_mat = get_opas_constants(M, N, DEVICE)
@@ -189,4 +189,4 @@ if __name__ == "__main__":
 
     MAP, MRR = compute_metrics(test_dataset, model, scoremodel, embed_model, preembed_model, image_embed_model=image_embed_model, stagger=stagger, verbose=True, aggregator=aggregator)
 
-    print(f"Test metrics on dataset \"{dataset}\" with model loaded from experiment {experiment_id} -- MAP: {MAP:.4f}, MRR: {MRR:.4f}")
+    print(f"Test metrics on dataset \"{dataset}\" with model loaded from experiment {experiment_id} -- MAP,MRR: {MAP:.4f},{MRR:.4f}")
