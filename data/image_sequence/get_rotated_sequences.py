@@ -98,7 +98,7 @@ if __name__ == "__main__":
     val_samples = sample(valset, classes, num_samples//2)
     test_samples = sample(testset, classes, num_samples//2)
 
-    dataset_save_path = f"rotated_sequences_{args.dataset_name}.hdf5"
+    dataset_save_path = f"rotated_sequences_{args.dataset_name}_{args.seq_len}.hdf5"
     if os.path.exists(dataset_save_path):
         print("Dataset exists at path, removing in 2 seconds..")
         time.sleep(2)
