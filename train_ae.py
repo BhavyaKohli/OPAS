@@ -11,8 +11,10 @@ import torchvision.transforms as transforms
 
 from tqdm import tqdm
 
+from opas.randomaug import RandAugment
 from opas.models.cifar_embed import Autoencoder
 from opas.models.lsun_embed import Autoencoder as LSUNAutoencoder
+
 
 SEED = 87
 np.random.seed(SEED)
@@ -22,17 +24,16 @@ if torch.cuda.is_available():
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--dataset_name', type=str, choices=["CIFAR", "LSUN"])
-    parser.add_argument('--device', type=int, default=-1, help="Cuda device index, pass -1 to run on cpu (not recommended)")
+    parser.add_argument('--dataset_name', type=str, choices=["CIFAR", "LSUN", "IMAGENET"])
+    parser.add_argument('--device', type=int, default=-1, help="CUDA device index, pass -1 to run on cpu (not recommended)")
     args = parser.parse_args()
 
     DEVICE = f"cuda:{args.device}" if torch.cuda.is_available() and args.device != -1 else "cpu"
     LSUN_ROOT = "data/lsun_gt/"
     CIFAR_ROOT = "data/cifar_gt/"
+    IMAGENET_ROOT = "data/imagenet_gt/"
 
     # Create model
-    from randomaug import RandAugment
-
     if args.dataset_name == "CIFAR":
         autoencoder = Autoencoder()
 
@@ -73,7 +74,7 @@ if __name__ == '__main__':
         size = (256, 256)
         # Load data
         transform_train = transforms.Compose([
-            transforms.RandomCrop(256, padding=4),
+            transforms.RandomCrop(198, padding=4),
             transforms.Resize(size),
             transforms.RandomHorizontalFlip(),
             transforms.RandomRotation(180),
@@ -91,8 +92,35 @@ if __name__ == '__main__':
         testset = torchvision.datasets.ImageFolder(root=os.path.join(LSUN_ROOT, "test"), transform=transform_train)
         testloader = torch.utils.data.DataLoader(testset, batch_size=256,
                                                 shuffle=False, num_workers=8)
+        
+    elif args.dataset_name == "IMAGENET":
+        ImageNetAutoencoder = LSUNAutoencoder
+        autoencoder = ImageNetAutoencoder()
+
+        size = (256, 256)
+        # Load data
+        transform_train = transforms.Compose([
+            transforms.RandomCrop(198, padding=4),
+            transforms.Resize(size),
+            transforms.RandomHorizontalFlip(),
+            transforms.RandomRotation(270),
+            transforms.ToTensor(),
+            transforms.Normalize([0.4735, 0.4494, 0.4040], [0.2741, 0.2659, 0.2775]),
+        ])
+
+        # Add RandAugment with N, M(hyperparameter)
+        N = 2; M = 14;
+        transform_train.transforms.insert(0, RandAugment(N, M))
+
+        trainset = torchvision.datasets.ImageFolder(root=os.path.join(IMAGENET_ROOT, "train"), transform=transform_train)
+        trainloader = torch.utils.data.DataLoader(trainset, batch_size=256,
+                                                shuffle=True, num_workers=8)
+        testset = torchvision.datasets.ImageFolder(root=os.path.join(IMAGENET_ROOT, "test"), transform=transform_train)
+        testloader = torch.utils.data.DataLoader(testset, batch_size=256,
+                                                shuffle=False, num_workers=8)
 
     # Define an optimizer and criterion
+    autoencoder.to(DEVICE)
     criterion = nn.MSELoss()
     optimizer = optim.Adam(autoencoder.parameters(), lr=1e-3)
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min', factor=0.8, patience=5)
