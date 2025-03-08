@@ -1,8 +1,6 @@
 from main import *
+from loguru import logger
 from time import perf_counter
-from functools import lru_cache
-
-
 
 class catchtime:
     def __enter__(self):
@@ -64,6 +62,22 @@ class SortLRL(nn.Module):
         return self.lrl(proj.values)
     
 
+def validation(qhasher, chasher, criterion, batch_fwd_q):
+    val_losses = []
+    for q, c, l in valloader:
+        q = q.to(DEVICE)
+        c = c.to(DEVICE)
+        l = l.float().to(DEVICE)
+
+        q = batch_fwd_q(q)
+        q, c = qhasher(q), chasher(c)
+        loss = criterion(q, c, l)
+        val_losses.append(loss.item())
+        
+    val_loss = np.mean(val_losses)
+    return val_loss
+
+
 if __name__ == "__main__":
     cli_args = OmegaConf.from_cli()
     if any([cli_args.expt_id is None, cli_args.device is None, cli_args.hash_latent is None]):
@@ -94,6 +108,26 @@ if __name__ == "__main__":
     for m in [model, scoremodel, embed_model, preembed_model]:
         for param in m.parameters():
             param.requires_grad = False
+
+    DEBUG = getattr(args, "debug", False)
+
+    hasher_expt_root = f"hashing/{experiment_id}"
+    logger.remove(0)
+    if not DEBUG:
+        os.makedirs(hasher_expt_root, exist_ok=True)
+        logger.add(f"{hasher_expt_root}/training.log", level="INFO", format="{time:D-MM-YYYY HH:mm:ss} | {level} | {message}")
+
+        with open(f"{hasher_expt_root}/args.pkl", "wb") as file:
+            pickle.dump(args, file)
+        
+        model_save_path = f"{hasher_expt_root}/hasher.pt"
+        print(f"Running with args: {args}")
+    else:
+        logger.add(sys.stdout, level="INFO", format="{time:D-MM-YYYY HH:mm:ss} | {level} | {message}")
+
+    logger.info("-"*100)
+    logger.info("python " + " ".join(sys.argv))
+    logger.info(f"Running with args: {args}")
 
     dataset = args.dataset
     DATA_ROOT = f"final_data/{dataset}"
@@ -201,28 +235,29 @@ if __name__ == "__main__":
             losses.append(loss.item())
             
             losses.append(loss.item())
-            inner_pbar.set_postfix_str(f"Epoch {epoch}, Loss: {np.mean(losses):.4f}, Best Val Loss: {best_val_loss:.4f}")
+            inner_pbar.set_postfix_str(f"ES: {es:2d}, Loss: {np.mean(losses):.4f}, Best Val Loss: {best_val_loss:.4f}")
 
         hasher.eval()
-        val_losses = []
-        for q, c, l in valloader:
-            q = q.to(DEVICE)
-            c = c.to(DEVICE)
-            l = l.float().to(DEVICE)
-
-            q = batch_fwd_q(q)
-            q, c = qhasher(q), chasher(c)
-            loss = criterion(q, c, l)
-            val_losses.append(loss.item())
-        
-        val_loss = np.mean(val_losses)
+        val_loss = validation(qhasher, chasher, criterion, batch_fwd_q)
         scheduler.step(val_loss)
+
+        logger.info(f"Epoch: {epoch}, Loss: {np.mean(losses):.4f}, Val Loss: {val_loss:.4f}, Best Val Loss: {loss.item():.4f}")
+
 
         if val_loss < best_val_loss:
             best_val_loss = val_loss
             es = 0
+            if not DEBUG:
+                torch.save(hasher, f"{expt_root}/hasher_best.pt")
+            bestwts = hasher.state_dict()
         else:
             es += 1
             if es > 30:
                 print(f"Early stopping at epoch {epoch}")
                 break
+    
+    hasher = hasher.load_state_dict(bestwts)
+    hasher.eval()
+    val_loss = validation(qhasher, chasher, criterion, batch_fwd_q)
+    print(f"Validation Loss: {val_loss:.4f}")
+    logger.info(f"Validation Loss: {val_loss:.4f}")    
