@@ -100,7 +100,7 @@ if __name__ == "__main__":
     args = OmegaConf.create(vars(args))
     args = argparse.Namespace(**OmegaConf.merge(args, cli_args, base_conf))
 
-    model, scoremodel, embed_model, preembed_model, aggregator = load_models(name="best", expt_root=expt_root, device=DEVICE)
+    model, scoremodel, embed_model, preembed_model, aggregator = load_models(name="best", expt_root=expt_root, device=DEVICE, args=args)
     model.eval(), scoremodel.eval(), embed_model.eval(), preembed_model.eval()
     if aggregator is not None:
         aggregator.eval()
@@ -226,8 +226,12 @@ if __name__ == "__main__":
             q, c = qhasher(q), chasher(c)
             # q: (batch_size, outdim)
             # c: (batch_size, outdim)
+            q, c = torch.tanh(q), torch.tanh(c)
 
             loss = criterion(q, c, l)
+            loss += 1e-1 * (((q.abs() - 1) ** 2).mean() + ((c.abs() - 1) ** 2).mean())
+            loss += 1e-2 * (torch.norm(q, p=1, dim=0).mean() + torch.norm(c, p=1, dim=0).mean())
+            
 
             optimizer.zero_grad()
             loss.backward()
