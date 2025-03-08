@@ -3,6 +3,7 @@ colab_notebooks/
 models/*
 models_/
 models_old/
+hashing/
 baselines/tensors/*.pt
 
 __pycache__/*
