@@ -13,7 +13,7 @@ class catchtime:
         print(self.readout)
 
 
-def load_models(name="best", expt_root=None, device="cpu"):
+def load_models(name="best", expt_root=None, device="cpu", args=None):
     if expt_root is None:
         raise ValueError("Please provide a valid experiment root folder in the inference script")
 
@@ -62,9 +62,9 @@ class SortLRL(nn.Module):
         return self.lrl(proj.values)
     
 
-def validation(qhasher, chasher, criterion, batch_fwd_q):
-    val_losses = []
-    for q, c, l in valloader:
+def validation(loader, qhasher, chasher, criterion, batch_fwd_q):
+    losses = []
+    for q, c, l in loader:
         q = q.to(DEVICE)
         c = c.to(DEVICE)
         l = l.float().to(DEVICE)
@@ -72,10 +72,10 @@ def validation(qhasher, chasher, criterion, batch_fwd_q):
         q = batch_fwd_q(q)
         q, c = qhasher(q), chasher(c)
         loss = criterion(q, c, l)
-        val_losses.append(loss.item())
+        losses.append(loss.item())
         
-    val_loss = np.mean(val_losses)
-    return val_loss
+    loss = np.mean(losses)
+    return loss
 
 
 if __name__ == "__main__":
@@ -238,17 +238,17 @@ if __name__ == "__main__":
             inner_pbar.set_postfix_str(f"ES: {es:2d}, Loss: {np.mean(losses):.4f}, Best Val Loss: {best_val_loss:.4f}")
 
         hasher.eval()
-        val_loss = validation(qhasher, chasher, criterion, batch_fwd_q)
+        val_loss = validation(valloader, qhasher, chasher, criterion, batch_fwd_q)
         scheduler.step(val_loss)
 
-        logger.info(f"Epoch: {epoch}, Loss: {np.mean(losses):.4f}, Val Loss: {val_loss:.4f}, Best Val Loss: {loss.item():.4f}")
+        logger.info(f"Epoch: {epoch}, Loss: {np.mean(losses):.4f}, Val Loss: {val_loss:.4f}, Best Val Loss: {best_val_loss:.4f}")
 
 
-        if val_loss < best_val_loss:
+        if val_loss <= best_val_loss - 1e-6:
             best_val_loss = val_loss
             es = 0
             if not DEBUG:
-                torch.save(hasher, f"{expt_root}/hasher_best.pt")
+                torch.save(hasher, f"{hasher_expt_root}/hasher_best.pt")
             bestwts = hasher.state_dict()
         else:
             es += 1
@@ -256,8 +256,8 @@ if __name__ == "__main__":
                 print(f"Early stopping at epoch {epoch}")
                 break
     
-    hasher = hasher.load_state_dict(bestwts)
+    hasher.load_state_dict(bestwts)
     hasher.eval()
-    val_loss = validation(qhasher, chasher, criterion, batch_fwd_q)
+    val_loss = validation(valloader, qhasher, chasher, criterion, batch_fwd_q)
     print(f"Validation Loss: {val_loss:.4f}")
     logger.info(f"Validation Loss: {val_loss:.4f}")    
