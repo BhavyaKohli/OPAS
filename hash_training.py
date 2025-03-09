@@ -226,12 +226,8 @@ if __name__ == "__main__":
             q, c = qhasher(q), chasher(c)
             # q: (batch_size, outdim)
             # c: (batch_size, outdim)
-            q, c = torch.tanh(q), torch.tanh(c)
 
             loss = criterion(q, c, l)
-            loss += 1e-1 * (((q.abs() - 1) ** 2).mean() + ((c.abs() - 1) ** 2).mean())
-            loss += 1e-2 * (torch.norm(q, p=1, dim=0).mean() + torch.norm(c, p=1, dim=0).mean())
-            
 
             optimizer.zero_grad()
             loss.backward()
