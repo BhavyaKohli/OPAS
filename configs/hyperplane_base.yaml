@@ -1,0 +1,5 @@
+batch_size: 800
+nepochs: 500
+lr: 1e-4
+nplanes: 20
+seed: 42
