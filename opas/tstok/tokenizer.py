@@ -50,7 +50,6 @@ class Tokenizer:
         if not isinstance(x, np.ndarray):
             x = np.array(x)
         
-
         if params == None:    
             if x.ndim == 1:
                 params = {'loc':x.mean(), 'scale':x.std()}
@@ -71,12 +70,11 @@ class Tokenizer:
         if not isinstance(self.bins, torch.Tensor):
             self.bins = torch.from_numpy(self.bins)
         if self.bins.device != x.device:
-            self.bins = self.bins.clone().to(x.device)
+            self.bins = self.bins.to(x.device)
 
         x = (x - x.mean(dim=-1, keepdim=True)) / (x.std(dim=-1, keepdim=True) + 1e-8)
         x = torch.clip(x, self.bins[0]+(1e-3), self.bins[-1]-(1e-3))
         token_ids = torch.clip(torch.bucketize(x, self.bins, right=False)-1, 0, len(self.bins)-2)
-
         return token_ids, None
     
     def decode(self, tkn_id, params):
