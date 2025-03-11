@@ -137,6 +137,8 @@ if __name__ == "__main__":
     logger.info(f"Running with args: {args}")
 
     dataset = args.dataset
+    if dataset == "lsun384":
+        dataset = "lsun"
     DATA_ROOT = f"final_data/{dataset}"
     TRAIN_FILE = f"{DATA_ROOT}/dataset_train.hdf5"
     VAL_FILE = f"{DATA_ROOT}/dataset_val.hdf5"
