@@ -1,6 +1,7 @@
 
 import numpy as np
 from scipy.stats import norm
+import torch
 
 class Tokenizer:
     def __init__(self, config):
@@ -8,7 +9,8 @@ class Tokenizer:
         self.MAX_COVERAGE = config.max_coverage
         self.bins, self.bin_values = self.get_gauusian_bins(self.BIN_SIZE, self.MAX_COVERAGE)
         self.vocab_size = len(self.bin_values)
-
+        self.bins = torch.from_numpy(self.bins)
+    
     @staticmethod
     def get_gauusian_bins(bin_size, max_coverage):
         # returns bin boundaries and bin centers s.t. each bin contains
@@ -47,6 +49,7 @@ class Tokenizer:
     def encode(self, x, params=None, return_pt=False):
         if not isinstance(x, np.ndarray):
             x = np.array(x)
+        
 
         if params == None:    
             if x.ndim == 1:
@@ -61,6 +64,20 @@ class Tokenizer:
         token_ids = np.clip(np.digitize(x, self.bins, right=False)-1, 0, len(self.bins)-2)
         
         return token_ids, params
+    
+    def encode_pt(self, x):
+        if not isinstance(x, torch.Tensor):
+            x = torch.from_numpy(x)
+        if not isinstance(self.bins, torch.Tensor):
+            self.bins = torch.from_numpy(self.bins)
+        if self.bins.device != x.device:
+            self.bins = self.bins.clone().to(x.device)
+
+        x = (x - x.mean(dim=-1, keepdim=True)) / (x.std(dim=-1, keepdim=True) + 1e-8)
+        x = torch.clip(x, self.bins[0]+(1e-3), self.bins[-1]-(1e-3))
+        token_ids = torch.clip(torch.bucketize(x, self.bins, right=False)-1, 0, len(self.bins)-2)
+
+        return token_ids, None
     
     def decode(self, tkn_id, params):
         # tkn_id is 2d mat of shape Batch x Sequence

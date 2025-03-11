@@ -8,7 +8,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from tqdm.auto import tqdm
+from tqdm import tqdm
 from datetime import datetime
 from omegaconf import OmegaConf
 
@@ -46,7 +46,7 @@ def get_tokenizer():
 TOKENIZER = get_tokenizer()
 
 
-def tokenize(x, args):
+def tokenize_og(x, args):
     if args.no_tokenize:
         return x, None
         
@@ -59,6 +59,13 @@ def tokenize(x, args):
     ids = torch.from_numpy(ids).long()
     ids = ids.reshape(orig_shape)
     return ids.to(device), p
+
+
+def tokenize(x, args):
+    if args.no_tokenize:
+        return x, None
+    ids, p = TOKENIZER.encode_pt(x)
+    return ids, p
 
 
 def get_white_noise(signal, SNR):
@@ -127,10 +134,10 @@ def embed_if_image_and_normalize(c, image_embed_model=None):
     return normalize(c)
 
 
-def embed_full_corpus(dataset, embed_model, preembed_model, image_embed_model=None, inner_batch_size=800, aggregator=None):
+def embed_full_corpus(dataset, embed_model, preembed_model, image_embed_model=None, inner_batch_size=800, aggregator=None, verbose=False):
     C = torch.from_numpy(dataset.c).float()
     Cembed = []
-    for batch in tqdm(range(0, len(C), inner_batch_size), disable=True):
+    for batch in tqdm(range(0, len(C), inner_batch_size), disable=not verbose):
         c = C[batch:batch+inner_batch_size].to(next(embed_model.parameters()).device)
         c = embed_if_image_and_normalize(c, image_embed_model)
         c = embed_model(preembed_model(c))
