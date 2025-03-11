@@ -200,7 +200,7 @@ if __name__ == "__main__":
     train_dataset = PairDatasetTrainHPlane(TRAIN_FILE, models=models, args=args, num_q=args.num_q, negative_exploration=args.neg_expl)
     val_dataset = PairDatasetTestHPlane(VAL_FILE, models=models, args=args, negative_exploration=args.neg_expl, num_q=100)
     test_dataset = PairDatasetTestHPlane(TEST_FILE, models=models, args=args, negative_exploration=args.neg_expl, num_q=100)
-    print(f"Pre-embedded corpus and queries in {perf_counter() - st:.3f}s")
+    print(f"Datasets loaded in {perf_counter() - st:.3f}s")
 
     trainloader = train_dataset.get_dataloader(batch_size=args.batch_size, shuffle=True)
     global_corpus = torch.cat((train_dataset.c, val_dataset.c, test_dataset.c), axis=0)
@@ -246,7 +246,8 @@ if __name__ == "__main__":
         if mu > bestmu:
             bestmu = mu
             es = 0
-            torch.save(W, f"{hasher_expt_root}/hyperplanes_{hplanes_id}.pkl")
+            if not DEBUG:
+                torch.save(W, f"{hasher_expt_root}/hyperplanes_{hplanes_id}.pkl")
         else:
             es += 1
             if es == 100:
@@ -254,6 +255,7 @@ if __name__ == "__main__":
         
         pbar.set_postfix_str(f"ES: {es:2d}, Index Spread: {mu:4f}, Best: {bestmu:.4f}")
 
-    # saving planes in numpy format for using in lshash3
-    W = torch.load(f"{hasher_expt_root}/hyperplanes_{hplanes_id}.pkl").cpu().detach().numpy()
-    np.savez_compressed(f"{hasher_expt_root}/weights.npz", *W)
+    if not DEBUG:
+        # saving planes in numpy format for using in lshash3
+        W = torch.load(f"{hasher_expt_root}/hyperplanes_{hplanes_id}.pkl").cpu().detach().numpy()
+        np.savez_compressed(f"{hasher_expt_root}/weights.npz", *W)
