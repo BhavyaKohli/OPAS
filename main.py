@@ -134,6 +134,7 @@ def embed_if_image_and_normalize(c, image_embed_model=None):
     return normalize(c)
 
 
+@torch.no_grad()
 def embed_full_corpus(dataset, embed_model, preembed_model, image_embed_model=None, inner_batch_size=800, aggregator=None, verbose=False):
     C = torch.from_numpy(dataset.c).float()
     Cembed = []
