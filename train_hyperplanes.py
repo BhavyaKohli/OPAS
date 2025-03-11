@@ -1,7 +1,7 @@
 from train_prehash import *
 
 
-def get_loss(qproj, cproj):
+def get_loss(qproj, cproj, l1=1e-3, l2=1e-1, l3=1e-6):
     loss1 = torch.norm(cproj.abs() - 1, p=1, dim=-1).sum(-1)    # fence sitting, sum over batch
     loss1 = loss1.mean()    # mean over planes
     loss2 = cproj.sum(dim=1).abs().sum(dim=-1)                  # bit balance, sum over bits
@@ -15,7 +15,7 @@ def get_loss(qproj, cproj):
     loss3 = F.relu(1 + neg_minus_pos).sum([1,2,3])              # collision minimizer, sum over pos, neg, batch
     loss3 = loss3.mean()    # mean over planes
 
-    loss = 1e-3 * loss1 + 1e-1 * loss2 + 1e-6 * loss3
+    loss = l1 * loss1 + l2 * loss2 + l3 * loss3
     return loss, loss1, loss2, loss3
 
 
@@ -122,6 +122,8 @@ if __name__ == "__main__":
     pbar = tqdm(range(1,args.nepochs+1,1), disable=False)
     bestmu = 0
     es = 0
+    l1, l2, l3 = getattr(args, "l1", 1e-3), getattr(args, "l2", 1e-1), getattr(args, "l3", 1e-6)
+    hplanes_id = f"{args.nbits}_{datetime.now():%H%M}"
 
     for epoch in pbar:
         inner_pbar = tqdm(trainloader, disable=False, leave=False)
@@ -137,14 +139,14 @@ if __name__ == "__main__":
             qproj = torch.einsum("nmd,bd->nbm", W, q).tanh()   # (nplanes, batch_size, nbits)
             cproj = torch.einsum("nmd,bd->nbm", W, c).tanh()   # (nplanes, batch_size, nbits)
 
-            loss = get_loss(qproj, cproj)[0]
+            loss = get_loss(qproj, cproj, l1, l2, l3)[0]
 
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
             train_loss.append(loss.item())
 
-            if i % 50 == 0:
+            if i % 100 == 0:
                 with torch.no_grad():
                     index = 0.5 * (torch.einsum("nmd,bd->nbm", W, global_corpus.to(DEVICE)).sign() + 1)
                     index_spread = [len(torch.unique(index[i], dim=0)) for i in range(len(index))]
@@ -153,7 +155,7 @@ if __name__ == "__main__":
                 
                 scheduler.step(mu)
             
-            inner_pbar.set_postfix_str(f"ES: {es:2d}, Loss: {loss.item():.4f}, Index Spread: {index_spread}")
+            inner_pbar.set_postfix_str(f"Loss: {loss.item():.4f}, Index Spread: {index_spread}")
         
         with torch.no_grad():
             index = 0.5 * (torch.einsum("nmd,bd->nbm", W, global_corpus.to(DEVICE)).sign() + 1)
@@ -164,10 +166,14 @@ if __name__ == "__main__":
         if mu > bestmu:
             bestmu = mu
             es = 0
-            torch.save(W, f"{hasher_expt_root}/hyperplanes.pt")
+            torch.save(W, f"{hasher_expt_root}/hyperplanes_{hplanes_id}.pkl")
         else:
             es += 1
-            if es == 50:
+            if es == 100:
                 break
         
-        pbar.set_postfix_str(f"Index Spread: {mu}, Best: {bestmu:.2f}")
+        pbar.set_postfix_str(f"ES: {es:2d}, Index Spread: {mu:4f}, Best: {bestmu:.4f}")
+
+    # saving planes in numpy format for using in lshash3
+    W = torch.load(f"{hasher_expt_root}/hyperplanes.pkl").cpu().detach().numpy()
+    np.savez_compressed(f"{hasher_expt_root}/weights.npz", *W)
