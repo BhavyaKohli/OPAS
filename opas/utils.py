@@ -50,6 +50,17 @@ def seed_everything(seed):
     torch.backends.cudnn.benchmark = False
 
 
+class catchtime:
+    def __enter__(self):
+        self.start = perf_counter()
+        return self
+
+    def __exit__(self, type, value, traceback):
+        self.time = perf_counter() - self.start
+        self.readout = f'\nTime: {self.time:.3f} seconds'
+        print(self.readout)
+
+
 # https://github.com/perrying/gumbel-sinkhorn/blob/master/utils/gumbel_sinkhorn_ops.py
 
 def sinkhorn_norm(alpha: torch.Tensor, n_iter: int = 20) -> (torch.Tensor,):
