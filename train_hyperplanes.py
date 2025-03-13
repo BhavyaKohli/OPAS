@@ -8,10 +8,9 @@ class DummyDataset:
 
 
 @torch.no_grad()
-def get_all_pair_scores(q_emb, c_emb, **kwargs):
-    model, scoremodel, embed_model, preembed_model, hasher = kwargs['models']
+def get_all_pair_scores(q_emb, c_emb, models, args):
+    model, scoremodel = models
     device = next(model.parameters()).device
-    args = kwargs['args']
 
     A_mat, a_vec, Rm_mat = get_opas_constants(M=q_emb[0].shape[0], N=c_emb[0].shape[0], device=device)
     CFG = AttributeDict({
@@ -51,10 +50,12 @@ class PairDatasetTrainHPlane(PairDatasetTrain):
     def __init__(self, filepath, models, args, num_q=300, negative_exploration=800, seed=15):
         # models: (model, scoremodel, embed_model, preembed_model, hasher)
         super().__init__(filepath, num_q, negative_exploration, seed)
+
+        model, scoremodel, embed_model, preembed_model, hasher = models
         with torch.no_grad():
             self.q_emb = embed_full_corpus(DummyDataset(self.q), embed_model, preembed_model)
             self.c_emb = embed_full_corpus(DummyDataset(self.c), embed_model, preembed_model)
-            self.qcscores = get_all_pair_scores(self.q_emb, self.c_emb, models=models, args=args)
+            self.qcscores = get_all_pair_scores(self.q_emb, self.c_emb, models=[model, scoremodel], args=args)
             self.q = hasher[0](self.q_emb).cpu()
             self.c = hasher[1](self.c_emb).cpu()
 
@@ -160,35 +161,7 @@ if __name__ == "__main__":
     VAL_FILE = f"{DATA_ROOT}/dataset_val.hdf5"
     TEST_FILE = f"{DATA_ROOT}/dataset_test.hdf5"
 
-    image_embed_model = None
-    name_replace = lambda x: x.replace(".hdf5", "_orig.hdf5")
-    if "cifar" in dataset:
-        image_embed_model_ckpt = "data/image_sequence/embedding_models/cifar_ae.pkl"
-        image_embed_model = Autoencoder()
-        image_embed_model.load_state_dict(torch.load(image_embed_model_ckpt))
-        image_embed_model.eval()
-
-        for param in image_embed_model.parameters():
-            param.requires_grad = False
-
-        image_embed_model = image_embed_model.to(DEVICE)
-        TRAIN_FILE = name_replace(TRAIN_FILE)
-        VAL_FILE = name_replace(VAL_FILE)
-        TEST_FILE = name_replace(TEST_FILE)
-
-    if "lsun" in dataset:
-        image_embed_model_ckpt = "data/image_sequence/embedding_models/lsun_ae.pkl"
-        image_embed_model = LSUNAutoencoder()
-        image_embed_model.load_state_dict(torch.load(image_embed_model_ckpt))
-        image_embed_model.eval()
-
-        for param in image_embed_model.parameters():
-            param.requires_grad = False
-
-        image_embed_model = image_embed_model.to(DEVICE)
-        TRAIN_FILE = name_replace(TRAIN_FILE)
-        VAL_FILE = name_replace(VAL_FILE)
-        TEST_FILE = name_replace(TEST_FILE)
+    image_embed_model, TRAIN_FILE, VAL_FILE, TEST_FILE = get_image_embed_model(dataset, TRAIN_FILE, VAL_FILE, TEST_FILE)
 
     W = nn.Parameter(torch.randn(args.nplanes, args.nbits, hasher[0].lrl[2].out_features, device=DEVICE), requires_grad=True)
     optimizer = torch.optim.Adam([W], lr=args.lr)

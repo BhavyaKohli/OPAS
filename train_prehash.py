@@ -2,15 +2,40 @@ from main import *
 from loguru import logger
 from time import perf_counter
 
-class catchtime:
-    def __enter__(self):
-        self.start = perf_counter()
-        return self
 
-    def __exit__(self, type, value, traceback):
-        self.time = perf_counter() - self.start
-        self.readout = f'\nTime: {self.time:.3f} seconds'
-        print(self.readout)
+def get_image_embed_model(dataset, TRAIN_FILE, VAL_FILE, TEST_FILE):
+    image_embed_model = None
+    name_replace = lambda x: x.replace(".hdf5", "_orig.hdf5")
+    
+    if "cifar" in dataset:
+        image_embed_model_ckpt = "data/image_sequence/embedding_models/cifar_ae.pkl"
+        image_embed_model = Autoencoder()
+        image_embed_model.load_state_dict(torch.load(image_embed_model_ckpt))
+        image_embed_model.eval()
+
+        for param in image_embed_model.parameters():
+            param.requires_grad = False
+
+        image_embed_model = image_embed_model.to(DEVICE)
+        TRAIN_FILE = name_replace(TRAIN_FILE)
+        VAL_FILE = name_replace(VAL_FILE)
+        TEST_FILE = name_replace(TEST_FILE)
+    
+    elif "lsun" in dataset:
+        image_embed_model_ckpt = "data/image_sequence/embedding_models/lsun_ae.pkl"
+        image_embed_model = LSUNAutoencoder()
+        image_embed_model.load_state_dict(torch.load(image_embed_model_ckpt))
+        image_embed_model.eval()
+
+        for param in image_embed_model.parameters():
+            param.requires_grad = False
+
+        image_embed_model = image_embed_model.to(DEVICE)
+        TRAIN_FILE = name_replace(TRAIN_FILE)
+        VAL_FILE = name_replace(VAL_FILE)
+        TEST_FILE = name_replace(TEST_FILE)
+
+    return image_embed_model, TRAIN_FILE, VAL_FILE, TEST_FILE
 
 
 def load_models(name="best", expt_root=None, device="cpu", args=None):
@@ -144,35 +169,7 @@ if __name__ == "__main__":
     VAL_FILE = f"{DATA_ROOT}/dataset_val.hdf5"
     TEST_FILE = f"{DATA_ROOT}/dataset_test.hdf5"
 
-    image_embed_model = None
-    name_replace = lambda x: x.replace(".hdf5", "_orig.hdf5")
-    if "cifar" in dataset:
-        image_embed_model_ckpt = "data/image_sequence/embedding_models/cifar_ae.pkl"
-        image_embed_model = Autoencoder()
-        image_embed_model.load_state_dict(torch.load(image_embed_model_ckpt))
-        image_embed_model.eval()
-
-        for param in image_embed_model.parameters():
-            param.requires_grad = False
-
-        image_embed_model = image_embed_model.to(DEVICE)
-        TRAIN_FILE = name_replace(TRAIN_FILE)
-        VAL_FILE = name_replace(VAL_FILE)
-        TEST_FILE = name_replace(TEST_FILE)
-    
-    if "lsun" in dataset:
-        image_embed_model_ckpt = "data/image_sequence/embedding_models/lsun_ae.pkl"
-        image_embed_model = LSUNAutoencoder()
-        image_embed_model.load_state_dict(torch.load(image_embed_model_ckpt))
-        image_embed_model.eval()
-
-        for param in image_embed_model.parameters():
-            param.requires_grad = False
-
-        image_embed_model = image_embed_model.to(DEVICE)
-        TRAIN_FILE = name_replace(TRAIN_FILE)
-        VAL_FILE = name_replace(VAL_FILE)
-        TEST_FILE = name_replace(TEST_FILE)
+    image_embed_model, TRAIN_FILE, VAL_FILE, TEST_FILE = get_image_embed_model(dataset, TRAIN_FILE, VAL_FILE, TEST_FILE)
     
     neg_expl = getattr(args, "neg_expl", 800)
     train_dataset = PairDatasetTrain(TRAIN_FILE, num_q=args.num_q, negative_exploration=neg_expl)
