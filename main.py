@@ -136,9 +136,11 @@ def embed_if_image_and_normalize(c, image_embed_model=None):
 
 @torch.no_grad()
 def embed_full_corpus(dataset, embed_model, preembed_model, image_embed_model=None, inner_batch_size=800, aggregator=None, verbose=False):
-    C = torch.from_numpy(dataset.c).float()
+    C = dataset.c
+    if not isinstance(C, torch.Tensor):
+        C = torch.from_numpy(C).float()    
     Cembed = []
-    for batch in tqdm(range(0, len(C), inner_batch_size), disable=not verbose):
+    for batch in tqdm(range(0, len(C), inner_batch_size), disable=not verbose, leave=False, desc="Embedding..."):
         c = C[batch:batch+inner_batch_size].to(next(embed_model.parameters()).device)
         c = embed_if_image_and_normalize(c, image_embed_model)
         c = embed_model(preembed_model(c))
@@ -934,11 +936,11 @@ if __name__ == '__main__':
         if DEEPSET:
             aggregator.eval()
         if not args.use_sing_xfmer:
-            mAP, mRR = compute_metrics(val_dataset, model, scoremodel, embed_model, preembed_model, image_embed_model=image_embed_model, stagger=stagger, verbose=False, aggregator=aggregator)
+            mAP, MRR = compute_metrics(val_dataset, model, scoremodel, embed_model, preembed_model, image_embed_model=image_embed_model, stagger=stagger, verbose=False, aggregator=aggregator)
 
             if mAP > best_val_map: 
                 best_val_map = mAP
-                val_mrr_at_best = mRR
+                val_mrr_at_best = MRR
                 if not args.debug: save_models(model, scoremodel, embed_model, preembed_model, aggregator)
 
             if enforce_order:
@@ -947,14 +949,14 @@ if __name__ == '__main__':
                 if args.wandb_log:
                     wandb.log({"ODR": odr})
         else:
-            mAP, mRR = 0, 0
+            mAP, MRR = 0, 0
             val_mrr_at_best = 0
             if not args.debug: save_models(model, scoremodel, embed_model, preembed_model, aggregator)
             
-        logging.info(f"[Epoch {i:2d}|{nepochs}] loss: {np.mean(wandb_losslog):.4f}, val mAP: {mAP:.4f}, val mRR: {mRR:.4f}, best mAP: {best_val_map:.4f}, mRR @ best val mAP: {val_mrr_at_best:.4f}")
+        logging.info(f"[Epoch {i:2d}|{nepochs}] loss: {np.mean(wandb_losslog):.4f}, val mAP: {mAP:.4f}, val mRR: {MRR:.4f}, best mAP: {best_val_map:.4f}, mRR @ best val mAP: {val_mrr_at_best:.4f}")
     
         if args.wandb_log:
-            wandb.log({"val MAP": mAP, "val MRR": mRR})
+            wandb.log({"val MAP": mAP, "val MRR": MRR})
             wandb.log({"best val MAP": best_val_map, "best val MRR": val_mrr_at_best})
             wandb_losslog = []
 
@@ -966,14 +968,14 @@ if __name__ == '__main__':
         aggregator.eval()
 
     if args.use_sing_xfmer:
-        mAP, mRR = compute_metrics_sing(test_dataset, model, scoremodel, embed_model, preembed_model, stagger=stagger, verbose=True)
+        mAP, MRR = compute_metrics_sing(test_dataset, model, scoremodel, embed_model, preembed_model, stagger=stagger, verbose=True)
     else:
-        mAP, mRR = compute_metrics(test_dataset, model, scoremodel, embed_model, preembed_model, image_embed_model=image_embed_model, stagger=stagger, verbose=True, aggregator=aggregator)
+        mAP, MRR = compute_metrics(test_dataset, model, scoremodel, embed_model, preembed_model, image_embed_model=image_embed_model, stagger=stagger, verbose=True, aggregator=aggregator)
     
-    logging.info(f"Final test metrics: MAP,MRR: {mAP:.4f},{mRR:.4f}")
+    logging.info(f"Final test metrics: MAP,MRR: {mAP:.4f},{MRR:.4f}")
     if args.wandb_log: 
-        wandb.log({"Test MAP": mAP, "Test MRR": mRR})
-    print(f"Final test metrics: MAP,MRR: {mAP:.4f},{mRR:.4f}")
+        wandb.log({"Test MAP": mAP, "Test MRR": MRR})
+    print(f"Final test metrics: MAP,MRR: {mAP:.4f},{MRR:.4f}")
 
     if not args.debug: save_models(model, scoremodel, embed_model, preembed_model, aggregator, final=True)
     logging.info("*"*120+"\n"+"*"*120)
