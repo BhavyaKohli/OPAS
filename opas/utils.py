@@ -1,7 +1,8 @@
-import numpy as np
-from numpy.linalg import norm
 import torch
+import numpy as np
 
+from time import perf_counter
+from numpy.linalg import norm
 
 def normalize(*args):
     ret = []
@@ -57,7 +58,7 @@ class catchtime:
 
     def __exit__(self, type, value, traceback):
         self.time = perf_counter() - self.start
-        self.readout = f'\nTime: {self.time:.3f} seconds'
+        self.readout = f'Time: {self.time:.3f} seconds'
         print(self.readout)
 
 
