@@ -143,7 +143,8 @@ if __name__ == "__main__":
 
     DEBUG = getattr(args, "debug", False)
 
-    hasher_expt_root = f"hashing/{experiment_id}"
+    ls = [int(l.split('_')[-1]) for l in os.listdir("hashing") if experiment_id in l and os.path.isdir(f"hashing/{l}")]
+    hasher_expt_root = f"hashing/{experiment_id}_{max(ls)+1}"
     logger.remove(0)
     if not DEBUG:
         os.makedirs(hasher_expt_root, exist_ok=True)
@@ -203,7 +204,6 @@ if __name__ == "__main__":
     pbar = tqdm(range(1,args.nepochs+1,1), disable=False)
     best_val_loss = float('inf')
     es = 0
-
     for epoch in pbar:
         inner_pbar = tqdm(trainloader, disable=False, leave=False)
 
@@ -240,8 +240,8 @@ if __name__ == "__main__":
         val_loss = validation(valloader, qhasher, chasher, criterion, batch_fwd_q)
         scheduler.step(val_loss)
 
-        logger.info(f"Epoch: {epoch}, Loss: {np.mean(losses):.4f}, Val Loss: {val_loss:.4f}, Best Val Loss: {best_val_loss:.4f}")
-
+        if not DEBUG:
+            logger.info(f"Epoch: {epoch}, Loss: {np.mean(losses):.4f}, Val Loss: {val_loss:.4f}, Best Val Loss: {best_val_loss:.4f}")
 
         if val_loss <= best_val_loss - 1e-6:
             best_val_loss = val_loss
