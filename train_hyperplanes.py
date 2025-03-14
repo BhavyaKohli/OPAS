@@ -120,7 +120,8 @@ if __name__ == "__main__":
     experiment_id = cli_args.expt_id
     folder = "models" if not getattr(cli_args, "old", None) else "models_old"
     expt_root = f"{folder}/{experiment_id}/"
-    hasher_expt_root = f"hashing/{experiment_id}/"
+    hasher_expt_num = cli_args.hexpt_num
+    hasher_expt_root = f"hashing/{experiment_id}_{hasher_expt_num}/"
     
     DEBUG = getattr(cli_args, "debug", False)
     if not DEBUG:

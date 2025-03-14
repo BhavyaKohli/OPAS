@@ -143,10 +143,10 @@ if __name__ == "__main__":
 
     if os.path.exists(saved_gt_path) and getattr(args, "skip_gt", True):
         savedict = torch.load(saved_gt_path)
-        corpus_embedded = savedict["corpus"]
-        labels = savedict["labels"]
-        global_scores = savedict["scores"]
-        test_query_embedded = savedict["queries"]
+        corpus_embedded = savedict["corpus"].cpu()
+        labels = savedict["labels"].cpu()
+        global_scores = savedict["scores"].cpu()
+        test_query_embedded = savedict["queries"].cpu()
         print("Loaded ground truth")
     else:
         dataset = args.dataset
@@ -215,8 +215,8 @@ if __name__ == "__main__":
 
     ####### LSH ########
     with torch.no_grad():
-        corpus_embedded = hasher[1](corpus_embedded).cpu()
-        test_query_embedded = hasher[0](test_query_embedded).cpu()
+        corpus_embedded = hasher[1](corpus_embedded.to(DEVICE)).cpu()
+        test_query_embedded = hasher[0](test_query_embedded.to(DEVICE)).cpu()
     
     k = None
     kbits = getattr(args, "kbits", 0)
