@@ -71,7 +71,7 @@ class LSH(object):
 
     def _query_single_loose(self, query, kbits):
         # returns all items where first k bits of hash match
-        if kbits == 0:
+        if kbits == self.m:
             return self._query_single(query)
         hashcodes = self.hashall(query)
         result_idxs = []
@@ -219,8 +219,8 @@ if __name__ == "__main__":
         test_query_embedded = hasher[0](test_query_embedded.to(DEVICE)).cpu()
     
     k = None
-    kbits = getattr(args, "kbits", 0)
     nbits = args.m
+    kbits = getattr(args, "kbits", nbits)
     L = args.L
     data_dim = corpus_embedded.shape[-1]
     hyperplanes_file = f'{hasher_expt_root}/{args.hplanes}.pkl'
@@ -254,5 +254,9 @@ if __name__ == "__main__":
         num_relevant.append(true_labels.sum().item())
 
     MAP = np.mean(MAP)
-    print(f"MAP: {MAP:.4f}")
+
+    with open(f"{hasher_expt_root}/lsh_perf.csv", "a+") as f:
+        f.write(f"{kbits}, {MAP:.4f}, {np.mean(num_matches):.2f}, {np.mean(num_relevant):.2f}\n")
+    
+    print(f"MAP: {MAP:.4f},")
     print(f"Mean matches: {np.mean(num_matches):.2f}, Mean relevant: {np.mean(num_relevant):.2f}")
