@@ -71,6 +71,8 @@ class LSH(object):
 
     def _query_single_loose(self, query, kbits):
         # returns all items where first k bits of hash match
+        if kbits == 0:
+            return self._query_single(query)
         hashcodes = self.hashall(query)
         result_idxs = []
         for t, code in enumerate(hashcodes):
@@ -121,7 +123,8 @@ if __name__ == "__main__":
     cli_args = OmegaConf.from_cli()
     
     expt_id = cli_args.expt_id
-    hasher_expt_root = f"hashing/{expt_id}"
+    hasher_expt_num = cli_args.hexpt_num
+    hasher_expt_root = f"hashing/{expt_id}_{hasher_expt_num}/"
     expt_root = f"models/{expt_id}/"
 
     import pickle
@@ -136,7 +139,7 @@ if __name__ == "__main__":
     hasher = torch.load(f"{hasher_expt_root}/hasher_best.pt", map_location=DEVICE)
     hasher = hasher.eval()
 
-    saved_gt_path = f"{hasher_expt_root}/embeds_gt.pkl"
+    saved_gt_path = f"hashing/{expt_id}_embeds_gt.pkl"
 
     if os.path.exists(saved_gt_path) and getattr(args, "skip_gt", True):
         savedict = torch.load(saved_gt_path)
@@ -216,6 +219,7 @@ if __name__ == "__main__":
         test_query_embedded = hasher[0](test_query_embedded).cpu()
     
     k = None
+    kbits = getattr(args, "kbits", 0)
     nbits = args.m
     L = args.L
     data_dim = corpus_embedded.shape[-1]
@@ -236,7 +240,7 @@ if __name__ == "__main__":
     ranked_output = []
     MAP = []
     for i in tqdm(range(len(lsh.q)), desc="Evaluating..."):
-        matches, match_idxs, sims = lsh.query(i, k, distance_func="orig")
+        matches, match_idxs, sims = lsh.query(i, k, distance_func="orig", kbits=kbits)
         sims = sorted(sims, reverse=True)
         true_labels = labels[i]
         total_rel = true_labels.sum().item()
