@@ -251,7 +251,7 @@ if __name__ == "__main__":
             bestwts = hasher.state_dict()
         else:
             es += 1
-            if es > 30:
+            if es > 50:
                 print(f"Early stopping at epoch {epoch}")
                 break
     
