@@ -70,10 +70,10 @@ def load_models(name="best", expt_root=None, device="cpu", args=None):
 
 
 def batch_fwd_q(image_embed_model, preembed_model, embed_model, q):
-        q = embed_if_image_and_normalize(q, image_embed_model)
-        q = embed_model(preembed_model(q))
-        q = normalize(q)
-        return q
+    q = embed_if_image_and_normalize(q, image_embed_model)
+    q = embed_model(preembed_model(q))
+    q = normalize(q)
+    return q
 
 
 class SortLRL(nn.Module):
@@ -94,6 +94,7 @@ class SortLRL(nn.Module):
         return self.lrl(proj.values)
     
 
+@torch.no_grad()
 def validation(loader, qhasher, chasher, criterion, batch_fwd_q):
     losses = []
     for q, c, l in loader:
@@ -108,6 +109,36 @@ def validation(loader, qhasher, chasher, criterion, batch_fwd_q):
         
     loss = np.mean(losses)
     return loss
+
+
+@torch.no_grad()
+def validation_map(dataset, qhasher, chasher, batch_fwd_q):
+    device = next(qhasher.parameters()).device
+    C = chasher(torch.from_numpy(dataset.c).to(device))
+
+    Q, true_labels = [], []
+    loader = dataset.get_dataloader(batch_size=150, shuffle=False)
+    for (q, l) in tqdm(loader, desc="Validation...", leave=False):
+        q = qhasher(batch_fwd_q(q.to(device)))
+        Q.append(q)  
+        true_labels.append(l.to('cpu'))
+
+    Q = torch.vstack(Q)
+    true_labels = torch.vstack(true_labels)
+    netscores = F.cosine_similarity(Q.unsqueeze(1), C.unsqueeze(0), dim=-1).to('cpu')
+
+    ranking = netscores.argsort(dim=1, descending=True)
+    ranked_output = torch.gather(true_labels, dim=1, index=ranking)
+
+    MRR = (1 / (ranked_output.argmax(dim=1) + 1)).mean().item()
+
+    MAP = (torch.cumsum(ranked_output, dim=1) * ranked_output).float()
+    MAP /= (torch.arange(ranked_output.shape[1]) + 1)
+    MAP /= torch.sum(ranked_output, dim=1, keepdim=True)
+    MAP = MAP.sum(dim=1).mean().item()
+
+    return MAP, MRR
+
 
 
 if __name__ == "__main__":
@@ -174,12 +205,14 @@ if __name__ == "__main__":
     
     neg_expl = getattr(args, "neg_expl", 800)
     train_dataset = PairDatasetTrain(TRAIN_FILE, num_q=args.num_q, negative_exploration=neg_expl)
-    val_dataset = PairDatasetTrain(VAL_FILE, num_q=args.num_q, negative_exploration=neg_expl)
-    
+    val_dataset = PairDatasetTest(VAL_FILE)
+    test_dataset = PairDatasetTest(TEST_FILE)
+
     st = perf_counter()
     with torch.no_grad():
         train_dataset.c = embed_full_corpus(train_dataset, embed_model, preembed_model, image_embed_model=image_embed_model, aggregator=aggregator).cpu().numpy()
         val_dataset.c = embed_full_corpus(val_dataset, embed_model, preembed_model, image_embed_model=image_embed_model, aggregator=aggregator).cpu().numpy()
+        test_dataset.c = embed_full_corpus(test_dataset, embed_model, preembed_model, image_embed_model=image_embed_model, aggregator=aggregator).cpu().numpy()
     print(f"Pre-embedded corpus in {perf_counter() - st:.3f}s")
 
     trainloader = train_dataset.get_dataloader(batch_size=args.batch_size, shuffle=True)
@@ -194,7 +227,7 @@ if __name__ == "__main__":
     hasher = nn.ModuleList([qhasher, chasher])
 
     optimizer = torch.optim.Adam(hasher.parameters(), lr=args.lr, weight_decay=1e-4)
-    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode="min", factor=0.9, patience=5)
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode="max", factor=0.9, patience=5)
     # criterion = lambda q, c, l: F.cosine_embedding_loss(q, c, l, margin=args.hash_margin)
     # criterion = lambda q, c, l: F.cross_entropy(0.5 * (F.cosine_similarity(q, c) + 1), l)
     criterion = lambda q, c, l: nn.BCELoss()(0.5 * (F.cosine_similarity(q, c) + 1), l)
@@ -202,7 +235,7 @@ if __name__ == "__main__":
     batch_fwd_q = partial(batch_fwd_q, image_embed_model, preembed_model, embed_model)
 
     pbar = tqdm(range(1,args.nepochs+1,1), disable=False)
-    best_val_loss = float('inf')
+    best_val_map = 0
     es = 0
     for epoch in pbar:
         inner_pbar = tqdm(trainloader, disable=False, leave=False)
@@ -210,6 +243,7 @@ if __name__ == "__main__":
         hasher.train()
         losses = []
         for n, (q, c, l) in enumerate(inner_pbar):
+            optimizer.zero_grad()
             qpos, cpos, lpos = train_dataset.get_positive_samples(positive_samples)
             
             q = torch.cat((q, qpos), dim=0).to(DEVICE)
@@ -228,23 +262,19 @@ if __name__ == "__main__":
 
             loss = criterion(q, c, l)
 
-            optimizer.zero_grad()
             loss.backward()
             optimizer.step()
             losses.append(loss.item())
             
             losses.append(loss.item())
-            inner_pbar.set_postfix_str(f"ES: {es:2d}, Loss: {np.mean(losses):.4f}, Best Val Loss: {best_val_loss:.4f}")
+            inner_pbar.set_postfix_str(f"Loss: {np.mean(losses[-50:]):.4f}")
 
         hasher.eval()
-        val_loss = validation(valloader, qhasher, chasher, criterion, batch_fwd_q)
-        scheduler.step(val_loss)
+        val_map, val_mrr = validation_map(val_dataset, qhasher, chasher, batch_fwd_q)
+        # scheduler.step(val_map)
 
-        if not DEBUG:
-            logger.info(f"Epoch: {epoch}, Loss: {np.mean(losses):.4f}, Val Loss: {val_loss:.4f}, Best Val Loss: {best_val_loss:.4f}")
-
-        if val_loss <= best_val_loss - 1e-6:
-            best_val_loss = val_loss
+        if val_map >= best_val_map + 1e-8:
+            best_val_map = val_map
             es = 0
             if not DEBUG:
                 torch.save(hasher, f"{hasher_expt_root}/hasher_best.pt")
@@ -254,9 +284,15 @@ if __name__ == "__main__":
             if es > 50:
                 print(f"Early stopping at epoch {epoch}")
                 break
-    
+        logstr = f"Epoch: {epoch}, Loss: {np.mean(losses):.4f}, Val MAP: {val_map:.4f}, Val MRR: {val_mrr:.4f}, Best Val MAP: {best_val_map:.4f}"
+        pbar.set_postfix_str(f"ES: {es:2d}, {logstr}")
+
+        if not DEBUG:
+            logger.info(logstr)
+
     hasher.load_state_dict(bestwts)
     hasher.eval()
-    val_loss = validation(valloader, qhasher, chasher, criterion, batch_fwd_q)
-    print(f"Validation Loss: {val_loss:.4f}")
-    logger.info(f"Validation Loss: {val_loss:.4f}")    
+    test_map, test_mrr = validation_map(test_dataset, qhasher, chasher, batch_fwd_q)
+    logstr = f"Test MAP: {test_map:.4f}, Test MRR: {test_mrr:.4f}"
+    print(logstr)
+    logger.info(logstr)    
