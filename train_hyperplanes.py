@@ -172,11 +172,12 @@ if __name__ == "__main__":
 
     st = perf_counter()
     train_dataset = PairDatasetTrainHPlane(TRAIN_FILE, models=models, args=args, num_q=args.num_q, negative_exploration=args.neg_expl)
-    val_dataset = PairDatasetTestHPlane(VAL_FILE, models=models, args=args, negative_exploration=args.neg_expl, num_q=100)
+    val_dataset = PairDatasetTestHPlane(VAL_FILE, models=models, args=args, negative_exploration=args.neg_expl, num_q=300)
     test_dataset = PairDatasetTestHPlane(TEST_FILE, models=models, args=args, negative_exploration=args.neg_expl, num_q=100)
     print(f"Datasets loaded in {perf_counter() - st:.3f}s")
 
     trainloader = train_dataset.get_dataloader(batch_size=args.batch_size, shuffle=True)
+    valloader = val_dataset.get_dataloader(batch_size=args.batch_size, shuffle=False)
     global_corpus = torch.cat((train_dataset.c, val_dataset.c, test_dataset.c), axis=0)
     print(f"Global corpus shape: {global_corpus.shape}")
 
@@ -187,6 +188,7 @@ if __name__ == "__main__":
     pbar = tqdm(range(1,args.nepochs+1,1), disable=False)
     bestmu = 0
     es = 0
+    track_metric = getattr(args, "track_metric", "index_spread")
 
     for epoch in pbar:
         inner_pbar = tqdm(trainloader, disable=False, leave=False)
@@ -217,15 +219,45 @@ if __name__ == "__main__":
         
         index_spread, mu, std = get_index_spread(W, global_corpus)
 
-        if mu > bestmu:
-            bestmu = mu
-            es = 0
-            if not DEBUG:
-                torch.save(W, f"{hasher_expt_root}/hyperplanes_{hplanes_id}.pkl")
-        else:
-            es += 1
-            if es == 100:
-                break
+        if track_metric == "index_spread":
+            if mu > bestmu:
+                bestmu = mu
+                es = 0
+                if not DEBUG:
+                    torch.save(W, f"{hasher_expt_root}/hyperplanes_{hplanes_id}.pkl")
+            else:
+                es += 1
+                if es == 100:
+                    break
+
+        elif track_metric == "collision":
+            inner_pbar = tqdm(valloader, leave=False, desc="Validation...")
+            
+            val_loss = []
+            for i, (q, c, sc) in enumerate(inner_pbar):
+                qpos, cpos, scpos = val_dataset.get_positive_samples(10)
+
+                q = torch.cat((q, qpos), dim=0).to(DEVICE)
+                c = torch.cat((c, cpos), dim=0).to(DEVICE)
+                sc = torch.cat((sc, scpos), dim=0).float().to(DEVICE)
+
+                qproj = torch.einsum("nmd,bd->nbm", W, q).tanh()   # (nplanes, batch_size, nbits)
+                cproj = torch.einsum("nmd,bd->nbm", W, c).tanh()   # (nplanes, batch_size, nbits)
+
+                loss = get_loss(qproj, cproj, sc, l1, l2, l3)[-1]
+                val_loss.append(loss.item())            
+
+            if -np.mean(val_loss) > bestmu:
+                bestmu = np.mean(train_loss)
+                es = 0
+                if not DEBUG:
+                    torch.save(W, f"{hasher_expt_root}/hyperplanes_{hplanes_id}.pkl")
+            else:
+                es += 1
+                if es == 100:
+                    break
+            
+
         
         pbar.set_postfix_str(f"ES: {es:2d}, Index Spread: {mu:4f}, Best: {bestmu:.4f}")
 
