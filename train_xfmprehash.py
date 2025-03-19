@@ -76,7 +76,7 @@ def save_models(embed_model, hasher, expt_root):
 
 
 @torch.no_grad()
-def validation_map(dataset, embed_model, preembed_model, image_embed_model, qhasher, chasher):
+def compute_metrics(dataset, embed_model, preembed_model, image_embed_model, qhasher, chasher):
     device = next(qhasher.parameters()).device
     C = embed_full_corpus(dataset, embed_model, preembed_model, image_embed_model, verbose=True)
     C = chasher(C)
@@ -262,8 +262,7 @@ if __name__ == "__main__":
 
         hashers.eval()
         embed_model.eval()
-        val_map, val_mrr = validation_map(val_dataset, embed_model, preembed_model, image_embed_model, qhasher, chasher)
-        # scheduler.step(val_map)
+        val_map, val_mrr = compute_metrics(val_dataset, embed_model, preembed_model, image_embed_model, qhasher, chasher)
 
         if val_map >= best_val_map + 1e-8:
             best_val_map = val_map
@@ -284,9 +283,11 @@ if __name__ == "__main__":
             logger.info(logstr)
 
     hashers.load_state_dict(bestwts)
-    embed_model.load_state_dict(bestwts_embed)
     hashers.eval()
-    test_map, test_mrr = validation_map(test_dataset, embed_model, preembed_model, image_embed_model, qhasher, chasher)
+    embed_model.load_state_dict(bestwts_embed)
+    embed_model.eval()
+    
+    test_map, test_mrr = compute_metrics(test_dataset, embed_model, preembed_model, image_embed_model, qhasher, chasher)
     logstr = f"Test MAP: {test_map:.4f}, Test MRR: {test_mrr:.4f}"
     print(logstr)
     logger.info(logstr)    
