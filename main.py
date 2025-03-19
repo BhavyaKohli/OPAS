@@ -711,7 +711,7 @@ if __name__ == '__main__':
         else:
             deepset = DeepSetModel(indim=args.xoutdim, latent=args.xoutdim//2, outdim=args.xoutdim//2).to(DEVICE)
             aggregator = nn.ModuleList([deepset, deepset])
-        aggregator_optimizer = torch.optim.Adam(aggregator.parameters(), lr=args.lr, weight_decay=1e-5)
+        aggregator_optimizer = torch.optim.Adam(aggregator.parameters(), lr=getattr(args, "agglr", args.lr), weight_decay=1e-5)
     else:
         aggregator = None
 
