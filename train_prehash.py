@@ -1,6 +1,7 @@
 from main import *
 from loguru import logger
 from time import perf_counter
+from opas.models.sortlrl import SortLRL
 
 
 def get_image_embed_model(dataset, TRAIN_FILE, VAL_FILE, TEST_FILE):
@@ -74,24 +75,6 @@ def batch_fwd_q(image_embed_model, preembed_model, embed_model, q):
     q = embed_model(preembed_model(q))
     q = normalize(q)
     return q
-
-
-class SortLRL(nn.Module):
-    def __init__(self, indim, seq_len, latent, outdim):
-        super().__init__()
-        self.alpha = nn.Parameter(torch.randn(1, indim))
-        self.lrl = nn.Sequential(
-            nn.Linear(seq_len, latent),
-            nn.ReLU(),
-            nn.Linear(latent, outdim)
-        )
-
-    def forward(self, x):
-        # x: (batch_size, seq_len, indim)
-        # output: (batch_size, outdim)
-        proj = (x @ self.alpha.T).squeeze(-1)
-        proj = torch.sort(proj, dim=-1)
-        return self.lrl(proj.values)
     
 
 @torch.no_grad()
