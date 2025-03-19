@@ -222,9 +222,18 @@ if __name__ == "__main__":
     M = train_dataset.q[0].shape[0]
     N = train_dataset.c[0].shape[0]
 
-    qhasher = SortLRL(indim=args.xoutdim, seq_len=M, latent=args.hash_latent, outdim=getattr(args, "hash_outdim", max(M,N))).to(DEVICE)
-    chasher = SortLRL(indim=args.xoutdim, seq_len=N, latent=args.hash_latent, outdim=getattr(args, "hash_outdim", max(M,N))).to(DEVICE)
-    hasher = nn.ModuleList([qhasher, chasher])
+    hasher_type = getattr(args, "hasher_type", "SortLRL")
+    if hasher_type == "SortLRL":
+        qhasher = SortLRL(indim=args.xoutdim, seq_len=M, latent=args.hash_latent, outdim=getattr(args, "hash_outdim", max(M,N))).to(DEVICE)
+        chasher = SortLRL(indim=args.xoutdim, seq_len=N, latent=args.hash_latent, outdim=getattr(args, "hash_outdim", max(M,N))).to(DEVICE)
+        hasher = nn.ModuleList([qhasher, chasher])
+    elif hasher_type == "DeepSet":
+        qhasher = DeepSetModel(indim=args.xoutdim, latent=args.hash_latent, outdim=getattr(args, "hash_outdim", max(M,N))).to(DEVICE)
+        if getattr(args, "share_hasher", False):
+            chasher = DeepSetModel(indim=args.xoutdim, latent=args.hash_latent, outdim=getattr(args, "hash_outdim", max(M,N))).to(DEVICE)
+        else:
+            chasher = qhasher
+        hasher = nn.ModuleList([qhasher, chasher])
 
     optimizer = torch.optim.Adam(hasher.parameters(), lr=args.lr, weight_decay=1e-4)
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode="max", factor=0.9, patience=5)
