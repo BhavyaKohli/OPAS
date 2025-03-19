@@ -70,9 +70,9 @@ def load_models(name="best", expt_root=None, device="cpu", args=None):
     return model, scoremodel, embed_model, preembed_model, aggregator
 
 
-def save_models(embed_model, hasher, expt_root):
-    torch.save(embed_model.to('cpu'), f"{expt_root}/embed_model.pt")
-    torch.save(hasher.to('cpu'), f"{expt_root}/hasher.pt")
+def save_models(embed_model, hashers, expt_root):
+    torch.save(embed_model, f"{expt_root}/embed_model.pt")
+    torch.save(hashers, f"{expt_root}/hasher.pt")
 
 
 @torch.no_grad()
@@ -112,9 +112,9 @@ def compute_metrics(dataset, embed_model, preembed_model, image_embed_model, qha
 
 if __name__ == "__main__":
     cli_args = OmegaConf.from_cli()
-    if any([cli_args.expt_id is None, cli_args.device is None, cli_args.hash_latent is None]):
+    if any([cli_args.expt_id is None, cli_args.device is None]):
         print(cli_args)
-        raise ValueError("Please provide a valid experiment ID (expt_id), device id (device), latent dimension for SortLRL (hash_latent)")
+        raise ValueError("Please provide a valid experiment ID (expt_id), device id (device)")
 
     base_conf = OmegaConf.load("configs/hash_base.yaml")
 
@@ -142,9 +142,6 @@ if __name__ == "__main__":
     if not DEBUG:
         os.makedirs(hasher_expt_root, exist_ok=True)
         logger.add(f"{hasher_expt_root}/training.log", level="INFO", format="{time:D-MM-YYYY HH:mm:ss} | {level} | {message}")
-
-        with open(f"{hasher_expt_root}/args.pkl", "wb") as file:
-            pickle.dump(args, file)
         
         model_save_path = f"{hasher_expt_root}/hasher.pt"
         print(f"Running with args: {args}")
@@ -153,7 +150,6 @@ if __name__ == "__main__":
 
     logger.info("-"*100)
     logger.info("python " + " ".join(sys.argv))
-    logger.info(f"Running with args: {args}")
 
     dataset = args.dataset
     if dataset == "lsun384":
@@ -217,11 +213,16 @@ if __name__ == "__main__":
     hashers = nn.ModuleList([qhasher, chasher])
     optimizer = torch.optim.Adam(hashers.parameters(), lr=args.lr, weight_decay=1e-4)
     
-    pbar = tqdm(range(1,nepochs+1,1), disable=False)
+    logger.info(f"Running with args: {args}")
+    if not DEBUG:
+        with open(f"{hasher_expt_root}/args.pkl", "wb") as file:
+            pickle.dump(args, file)
+
+    pbar = tqdm(range(1,nepochs+1,1), disable=False, desc="Training...")
     best_val_map = 0
     es = 0
     for epoch in pbar:
-        inner_pbar = tqdm(trainloader, disable=False, leave=False)
+        inner_pbar = tqdm(trainloader, disable=False, leave=False, desc=f"Training Epoch {epoch:3d}")
 
         embed_model.train()
         hashers.train()
@@ -268,7 +269,7 @@ if __name__ == "__main__":
             best_val_map = val_map
             es = 0
             if not DEBUG:
-                torch.save(hashers, f"{hasher_expt_root}/hasher_best.pt")
+                save_models(embed_model, hashers, hasher_expt_root)
             bestwts = hashers.state_dict()
             bestwts_embed = embed_model.state_dict()
         else:
