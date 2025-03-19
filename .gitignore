@@ -4,6 +4,7 @@ models/*
 models_/
 models_old/
 hashing/
+xhashing/
 baselines/tensors/*.pt
 
 __pycache__/*
