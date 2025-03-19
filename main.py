@@ -21,6 +21,7 @@ from opas.models.cifar_embed import Autoencoder
 from opas.models.lsun_embed import Autoencoder as LSUNAutoencoder
 from opas.models.ts_encoders import Conv1dTS, EncConv1dTS, MelConv1dTS
 from opas.models.deepset import DeepSetModel
+from opas.models.sortlrl import SortLRL
 
 from transformers import get_linear_schedule_with_warmup, AdamW
 
@@ -146,7 +147,7 @@ def embed_full_corpus(dataset, embed_model, preembed_model, image_embed_model=No
         c = embed_model(preembed_model(c))
         c = normalize(c)
         if aggregator is not None:
-            c = aggregator(c)
+            c = aggregator[1](c)
         Cembed.append(c)
     C = torch.vstack(Cembed)
     return C
@@ -210,7 +211,7 @@ def compute_metrics(dataset, model, scoremodel, embed_model, preembed_model, ima
             del P, F_mat, RmPC, q
 
         else:
-            q = aggregator(q)
+            q = aggregator[0](q)
             # q is bd, C is Nd, we want bN scores
             # b1d - 1Nd = bNd --> sum across last dim to get bN scores
             netscore = 2 * F.sigmoid(-F.relu(q.unsqueeze(1) - C.unsqueeze(0)).sum(dim=-1))    # bN
@@ -224,14 +225,14 @@ def compute_metrics(dataset, model, scoremodel, embed_model, preembed_model, ima
     ranking = netscores.argsort(dim=1, descending=True)
     ranked_output = torch.gather(true_labels, dim=1, index=ranking)
 
-    mRR = (1 / (ranked_output.argmax(dim=1) + 1)).mean().item()
+    MRR = (1 / (ranked_output.argmax(dim=1) + 1)).mean().item()
 
-    mAP = (torch.cumsum(ranked_output, dim=1) * ranked_output).float()
-    mAP /= (torch.arange(ranked_output.shape[1]) + 1)
-    mAP /= torch.sum(ranked_output, dim=1, keepdim=True)
-    mAP = mAP.sum(dim=1).mean().item()
+    MAP = (torch.cumsum(ranked_output, dim=1) * ranked_output).float()
+    MAP /= (torch.arange(ranked_output.shape[1]) + 1)
+    MAP /= torch.sum(ranked_output, dim=1, keepdim=True)
+    MAP = MAP.sum(dim=1).mean().item()
 
-    return mAP, mRR
+    return MAP, MRR
 
 @torch.no_grad()
 def compute_metrics_sing(dataset, model, scoremodel, embed_model, preembed_model, stagger=2, verbose=False):
@@ -285,14 +286,14 @@ def compute_metrics_sing(dataset, model, scoremodel, embed_model, preembed_model
     ranking = netscores.argsort(dim=1, descending=True)
     ranked_output = torch.gather(true_labels, dim=1, index=ranking)
 
-    mRR = (1 / (ranked_output.argmax(dim=1) + 1)).mean().item()
+    MRR = (1 / (ranked_output.argmax(dim=1) + 1)).mean().item()
 
-    mAP = (torch.cumsum(ranked_output, dim=1) * ranked_output).float()
-    mAP /= (torch.arange(ranked_output.shape[1]) + 1)
-    mAP /= torch.sum(ranked_output, dim=1, keepdim=True)
-    mAP = mAP.sum(dim=1).mean().item()
+    MAP = (torch.cumsum(ranked_output, dim=1) * ranked_output).float()
+    MAP /= (torch.arange(ranked_output.shape[1]) + 1)
+    MAP /= torch.sum(ranked_output, dim=1, keepdim=True)
+    MAP = MAP.sum(dim=1).mean().item()
 
-    return mAP, mRR
+    return MAP, MRR
 
 
 @torch.no_grad()
@@ -392,17 +393,17 @@ def load_models(name="best", expt_id=None, device="cpu"):
     
     print(f"Loading `{name}` model")
 
-    model = torch.load(f"models/{expt_id}/model{suffix}.pt", map_location=device, weights_only=False)
-    scoremodel = torch.load(f"models/{expt_id}/scmodel{suffix}.pt", map_location=device, weights_only=False)
-    embed_model = torch.load(f"models/{expt_id}/embed_model{suffix}.pt", map_location=device, weights_only=False)
+    model = torch.load(f"models/{expt_id}/model{suffix}.pt", MAP_location=device, weights_only=False)
+    scoremodel = torch.load(f"models/{expt_id}/scmodel{suffix}.pt", MAP_location=device, weights_only=False)
+    embed_model = torch.load(f"models/{expt_id}/embed_model{suffix}.pt", MAP_location=device, weights_only=False)
     if os.path.exists(f"models/{expt_id}/preembed_model{suffix}.pt"):
-        preembed_model = torch.load(f"models/{expt_id}/preembed_model{suffix}.pt", map_location=device, weights_only=False)
+        preembed_model = torch.load(f"models/{expt_id}/preembed_model{suffix}.pt", MAP_location=device, weights_only=False)
     else:
         tokenize_transform = lambda x: tokenize(x, args)[0]
         preembed_model = TransformInput(tokenize_transform).to(device)
     
     if os.path.exists(f"models/{expt_id}/aggregator{suffix}.pt"):
-        aggregator = torch.load(f"models/{expt_id}/aggregator{suffix}.pt", map_location=device, weights_only=False)
+        aggregator = torch.load(f"models/{expt_id}/aggregator{suffix}.pt", MAP_location=device, weights_only=False)
     else:
         aggregator = None
 
@@ -455,7 +456,7 @@ if __name__ == '__main__':
         experiment_id = f"C{experiment_id}" 
         image_embed_model_ckpt = "data/image_sequence/embedding_models/cifar_ae.pkl"
         image_embed_model = Autoencoder()
-        image_embed_model.load_state_dict(torch.load(image_embed_model_ckpt, map_location=DEVICE))
+        image_embed_model.load_state_dict(torch.load(image_embed_model_ckpt, MAP_location=DEVICE))
         image_embed_model.eval()
 
         for param in image_embed_model.parameters():
@@ -467,7 +468,7 @@ if __name__ == '__main__':
 
         image_embed_model_ckpt = "data/image_sequence/embedding_models/lsun_ae.pkl"
         image_embed_model = LSUNAutoencoder()
-        image_embed_model.load_state_dict(torch.load(image_embed_model_ckpt, map_location=DEVICE))
+        image_embed_model.load_state_dict(torch.load(image_embed_model_ckpt, MAP_location=DEVICE))
         image_embed_model.eval()
 
         for param in image_embed_model.parameters():
@@ -702,7 +703,14 @@ if __name__ == '__main__':
         attention_model = None
 
     if DEEPSET:
-        aggregator = DeepSetModel(indim=args.xoutdim, latent=args.xoutdim//2, outdim=args.xoutdim//2).to(DEVICE)
+        use_sort_lrl = getattr(args, "use_sort_lrl", False)
+        if use_sort_lrl:
+            qsort = SortLRL(args.xoutdim, seq_len=M, latent=args.xff, outdim=args.xoutdim).to(DEVICE)
+            csort = SortLRL(args.xoutdim, seq_len=N, latent=args.xff, outdim=args.xoutdim).to(DEVICE)
+            aggregator = nn.ModuleList([qsort, csort])
+        else:
+            deepset = DeepSetModel(indim=args.xoutdim, latent=args.xoutdim//2, outdim=args.xoutdim//2).to(DEVICE)
+            aggregator = nn.ModuleList([deepset, deepset])
         aggregator_optimizer = torch.optim.Adam(aggregator.parameters(), lr=args.lr, weight_decay=1e-5)
     else:
         aggregator = None
@@ -805,7 +813,7 @@ if __name__ == '__main__':
     logging.info("Training\n"+"*"*120+"\n"+"*"*120)
 
     pbar = tqdm(range(1,nepochs+1,1), disable=False)
-    best_val_map, best_val_mrr = 0, 0
+    best_val_MAP, best_val_MRR = 0, 0
 
     enforce_order = args.enforce_order
 
@@ -890,12 +898,12 @@ if __name__ == '__main__':
 
                 allscores = torch.stack([lamscore, normscore], dim=1)
                 netscore = 2*scoremodel(-allscores).squeeze()
-            elif DEEPSET:
-                q, c = aggregator(q), aggregator(c)
+            else:
+                q, c = aggregator[0](q), aggregator[1](c)
                 if args.deepset_mode == 2:
                     netscore = 2 * F.sigmoid(-F.relu(q - c).sum(dim=-1))    # normalized to 0-1, 0 for worst, 1 for best (==0 loss)
                 elif args.deepset_mode == 1:
-                    netscore = -F.relu(q - c).sum(dim=-1)                 # un-normalized scores
+                    netscore = -F.relu(q - c).sum(dim=-1)                   # un-normalized scores
 
             pos_score = torch.atleast_1d(netscore[torch.where(l==1)])
             neg_score = netscore[torch.where(l==0)]
@@ -936,11 +944,11 @@ if __name__ == '__main__':
         if DEEPSET:
             aggregator.eval()
         if not args.use_sing_xfmer:
-            mAP, MRR = compute_metrics(val_dataset, model, scoremodel, embed_model, preembed_model, image_embed_model=image_embed_model, stagger=stagger, verbose=False, aggregator=aggregator)
+            MAP, MRR = compute_metrics(val_dataset, model, scoremodel, embed_model, preembed_model, image_embed_model=image_embed_model, stagger=stagger, verbose=False, aggregator=aggregator)
 
-            if mAP > best_val_map: 
-                best_val_map = mAP
-                val_mrr_at_best = MRR
+            if MAP > best_val_MAP: 
+                best_val_MAP = MAP
+                val_MRR_at_best = MRR
                 if not args.debug: save_models(model, scoremodel, embed_model, preembed_model, aggregator)
 
             if enforce_order:
@@ -949,15 +957,15 @@ if __name__ == '__main__':
                 if args.wandb_log:
                     wandb.log({"ODR": odr})
         else:
-            mAP, MRR = 0, 0
-            val_mrr_at_best = 0
+            MAP, MRR = 0, 0
+            val_MRR_at_best = 0
             if not args.debug: save_models(model, scoremodel, embed_model, preembed_model, aggregator)
             
-        logging.info(f"[Epoch {i:2d}|{nepochs}] loss: {np.mean(wandb_losslog):.4f}, val mAP: {mAP:.4f}, val mRR: {MRR:.4f}, best mAP: {best_val_map:.4f}, mRR @ best val mAP: {val_mrr_at_best:.4f}")
+        logging.info(f"[Epoch {i:2d}|{nepochs}] loss: {np.mean(wandb_losslog):.4f}, val MAP: {MAP:.4f}, val MRR: {MRR:.4f}, best MAP: {best_val_MAP:.4f}, MRR @ best val MAP: {val_MRR_at_best:.4f}")
     
         if args.wandb_log:
-            wandb.log({"val MAP": mAP, "val MRR": MRR})
-            wandb.log({"best val MAP": best_val_map, "best val MRR": val_mrr_at_best})
+            wandb.log({"val MAP": MAP, "val MRR": MRR})
+            wandb.log({"best val MAP": best_val_MAP, "best val MRR": val_MRR_at_best})
             wandb_losslog = []
 
         if not args.debug: save_models(model, scoremodel, embed_model, preembed_model, aggregator, latest=True)
@@ -968,14 +976,14 @@ if __name__ == '__main__':
         aggregator.eval()
 
     if args.use_sing_xfmer:
-        mAP, MRR = compute_metrics_sing(test_dataset, model, scoremodel, embed_model, preembed_model, stagger=stagger, verbose=True)
+        MAP, MRR = compute_metrics_sing(test_dataset, model, scoremodel, embed_model, preembed_model, stagger=stagger, verbose=True)
     else:
-        mAP, MRR = compute_metrics(test_dataset, model, scoremodel, embed_model, preembed_model, image_embed_model=image_embed_model, stagger=stagger, verbose=True, aggregator=aggregator)
+        MAP, MRR = compute_metrics(test_dataset, model, scoremodel, embed_model, preembed_model, image_embed_model=image_embed_model, stagger=stagger, verbose=True, aggregator=aggregator)
     
-    logging.info(f"Final test metrics: MAP,MRR: {mAP:.4f},{MRR:.4f}")
+    logging.info(f"Final test metrics: MAP,MRR: {MAP:.4f},{MRR:.4f}")
     if args.wandb_log: 
-        wandb.log({"Test MAP": mAP, "Test MRR": MRR})
-    print(f"Final test metrics: MAP,MRR: {mAP:.4f},{MRR:.4f}")
+        wandb.log({"Test MAP": MAP, "Test MRR": MRR})
+    print(f"Final test metrics: MAP,MRR: {MAP:.4f},{MRR:.4f}")
 
     if not args.debug: save_models(model, scoremodel, embed_model, preembed_model, aggregator, final=True)
     logging.info("*"*120+"\n"+"*"*120)
