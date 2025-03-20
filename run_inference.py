@@ -2,7 +2,7 @@ import os
 
 from main import *
 from opas.utils import get_opas_constants
-from opas.models.utils import load_models, get_image_embed_model
+from opas.models.model_utils import load_models, get_image_embed_model
 
 
 @torch.no_grad()

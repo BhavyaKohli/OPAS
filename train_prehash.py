@@ -2,7 +2,7 @@ from main import *
 from loguru import logger
 from time import perf_counter
 from opas.models.sortlrl import SortLRL
-from opas.models.utils import load_models, get_image_embed_model
+from opas.models.model_utils import load_models, get_image_embed_model
 
 
 def batch_fwd_q(image_embed_model, preembed_model, embed_model, q):

@@ -22,7 +22,7 @@ from opas.models.lsun_embed import Autoencoder as LSUNAutoencoder
 from opas.models.ts_encoders import Conv1dTS, EncConv1dTS, MelConv1dTS
 from opas.models.deepset import DeepSetModel
 from opas.models.sortlrl import SortLRL
-from opas.models.utils import load_models
+from opas.models.model_utils import load_models
 
 from transformers import get_linear_schedule_with_warmup, AdamW
 
