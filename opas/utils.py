@@ -4,6 +4,7 @@ import numpy as np
 from time import perf_counter
 from numpy.linalg import norm
 
+
 def normalize(*args):
     ret = []
     for arg in args:

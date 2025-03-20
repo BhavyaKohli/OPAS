@@ -12,16 +12,17 @@ from tqdm import tqdm
 from datetime import datetime
 from omegaconf import OmegaConf
 
-from opas.tstok.tokenizer import Tokenizer
+from opas.tstok.tsutils import TOKENIZER, tokenize, batch_get_white_noise
 from opas.utils import AttributeDict, gumbel_sinkhorn, normalize, get_opas_constants, seed_everything
 from opas.data import PairDatasetTrain, PairDatasetTest
 
-from opas.models.main import LamModel, ScoreModel, PositionalEncoding
+from opas.models.main import LamModel, ScoreModel, PositionalEncoding, TransformInput
 from opas.models.cifar_embed import Autoencoder
 from opas.models.lsun_embed import Autoencoder as LSUNAutoencoder
 from opas.models.ts_encoders import Conv1dTS, EncConv1dTS, MelConv1dTS
 from opas.models.deepset import DeepSetModel
 from opas.models.sortlrl import SortLRL
+from opas.models.utils import load_models
 
 from transformers import get_linear_schedule_with_warmup, AdamW
 
@@ -31,55 +32,6 @@ import torchaudio.transforms as T
 
 
 tqdm = partial(tqdm, ncols=150)
-
-def get_tokenizer():
-    data_config = AttributeDict({
-        "max_seq_len": 160,
-        "batch_size": 64,
-        "bin_size": 0.005,
-        "max_coverage": .9998,
-        "vocab_size": 512
-    })
-    tokenizer = Tokenizer(data_config)
-    
-    return tokenizer
-
-TOKENIZER = get_tokenizer()
-
-
-def tokenize_og(x, args):
-    if args.no_tokenize:
-        return x, None
-        
-    orig_shape = x.shape
-    device = x.device
-    x = x.squeeze().cpu()
-    if len(x.shape) == 3:
-        x = x.reshape(-1, orig_shape[-1])   
-    ids, p = TOKENIZER.encode(x)
-    ids = torch.from_numpy(ids).long()
-    ids = ids.reshape(orig_shape)
-    return ids.to(device), p
-
-
-def tokenize(x, args):
-    if args.no_tokenize:
-        return x, None
-    ids, p = TOKENIZER.encode_pt(x)
-    return ids, p
-
-
-def get_white_noise(signal, SNR):
-    RMS_s = torch.sqrt(torch.mean(signal**2))
-    RMS_n = torch.sqrt(RMS_s**2 / (pow(10, SNR/10)))
-    STD_n = RMS_n
-    noise = torch.distributions.Normal(0, STD_n).sample(signal.shape)
-    return noise
-
-
-def batch_get_white_noise(x, SNR):
-    # x is B x m/n x signal
-    return get_white_noise(x, SNR)
 
 
 def stagger_and_concat(model_inputs, num_stagger=1):
@@ -106,15 +58,6 @@ class Attention_Layer(nn.Module):
         w = self.w(X)
         output = F.softmax(torch.mul(X, w), dim=1)
         return output
-    
-
-class TransformInput(nn.Module):
-    def __init__(self, transform):
-        super().__init__()
-        self.transform = transform
-
-    def forward(self, x):
-        return self.transform(x)
 
 
 @torch.no_grad()
@@ -215,6 +158,9 @@ def compute_metrics(dataset, model, scoremodel, embed_model, preembed_model, ima
             # q is bd, C is Nd, we want bN scores
             # b1d - 1Nd = bNd --> sum across last dim to get bN scores
             netscore = 2 * F.sigmoid(-F.relu(q.unsqueeze(1) - C.unsqueeze(0)).sum(dim=-1))    # bN
+            # TODO: fix this
+            if args.deepset_mode == "cosine":     # 3
+                netscore = 0.5 * (F.cosine_similarity(q.unsqueeze(1), C.unsqueeze(0), dim=-1) + 1)
 
         netscores.append(netscore.to('cpu'))
         true_labels.append(l.to('cpu'))
@@ -355,13 +301,13 @@ def save_models(model, scoremodel, embed_model, preembed_model, aggregator=None,
     if final:
         suffix = "_last"
         try:
-            os.remove(f"models/{experiment_id}/model_latest.pt")
-            os.remove(f"models/{experiment_id}/scmodel_latest.pt")
-            os.remove(f"models/{experiment_id}/embed_model_latest.pt")
+            os.remove(f"{EXPT_ROOT}/model_latest.pt")
+            os.remove(f"{EXPT_ROOT}/scmodel_latest.pt")
+            os.remove(f"{EXPT_ROOT}/embed_model_latest.pt")
             if args.preembed != "tokenize":
-                os.remove(f"models/{experiment_id}/preembed_model_latest.pt")
+                os.remove(f"{EXPT_ROOT}/preembed_model_latest.pt")
             if aggregator is not None:
-                os.remove(f"models/{experiment_id}/aggregator_latest.pt")
+                os.remove(f"{EXPT_ROOT}/aggregator_latest.pt")
         except:
             print("Couldn't delete `latest` models")
     elif latest:
@@ -370,44 +316,13 @@ def save_models(model, scoremodel, embed_model, preembed_model, aggregator=None,
         suffix = ""
     
     logging.info(f"Saving models... experiment id: {experiment_id}")
-    torch.save(model, f"models/{experiment_id}/model{suffix}.pt")
-    torch.save(scoremodel, f"models/{experiment_id}/scmodel{suffix}.pt")
-    torch.save(embed_model, f"models/{experiment_id}/embed_model{suffix}.pt")
+    torch.save(model, f"{EXPT_ROOT}/model{suffix}.pt")
+    torch.save(scoremodel, f"{EXPT_ROOT}/scmodel{suffix}.pt")
+    torch.save(embed_model, f"{EXPT_ROOT}/embed_model{suffix}.pt")
     if args.preembed != "tokenize":
-        torch.save(preembed_model, f"models/{experiment_id}/preembed_model{suffix}.pt")
+        torch.save(preembed_model, f"{EXPT_ROOT}/preembed_model{suffix}.pt")
     if aggregator is not None:
-        torch.save(aggregator, f"models/{experiment_id}/aggregator{suffix}.pt")
-
-
-def load_models(name="best", expt_id=None, device="cpu"):
-    if expt_id is None:
-        expt_id = experiment_id
-
-    if name not in ["best", "last", "latest"]:
-        raise NotImplementedError("Only `best`, `last`, and `latest` models are supported")
-    
-    if name=="best":
-        suffix = ""
-    else:
-        suffix = f"_{name}"
-    
-    print(f"Loading `{name}` model")
-
-    model = torch.load(f"models/{expt_id}/model{suffix}.pt", MAP_location=device, weights_only=False)
-    scoremodel = torch.load(f"models/{expt_id}/scmodel{suffix}.pt", MAP_location=device, weights_only=False)
-    embed_model = torch.load(f"models/{expt_id}/embed_model{suffix}.pt", MAP_location=device, weights_only=False)
-    if os.path.exists(f"models/{expt_id}/preembed_model{suffix}.pt"):
-        preembed_model = torch.load(f"models/{expt_id}/preembed_model{suffix}.pt", MAP_location=device, weights_only=False)
-    else:
-        tokenize_transform = lambda x: tokenize(x, args)[0]
-        preembed_model = TransformInput(tokenize_transform).to(device)
-    
-    if os.path.exists(f"models/{expt_id}/aggregator{suffix}.pt"):
-        aggregator = torch.load(f"models/{expt_id}/aggregator{suffix}.pt", MAP_location=device, weights_only=False)
-    else:
-        aggregator = None
-
-    return model, scoremodel, embed_model, preembed_model, aggregator
+        torch.save(aggregator, f"{EXPT_ROOT}/aggregator{suffix}.pt")
 
 
 class LRLModel(nn.Module):
@@ -469,7 +384,7 @@ if __name__ == '__main__':
         experiment_id = f"C{experiment_id}" 
         image_embed_model_ckpt = "data/image_sequence/embedding_models/cifar_ae.pkl"
         image_embed_model = Autoencoder()
-        image_embed_model.load_state_dict(torch.load(image_embed_model_ckpt, MAP_location=DEVICE))
+        image_embed_model.load_state_dict(torch.load(image_embed_model_ckpt, map_location=DEVICE))
         image_embed_model.eval()
 
         for param in image_embed_model.parameters():
@@ -481,7 +396,7 @@ if __name__ == '__main__':
 
         image_embed_model_ckpt = "data/image_sequence/embedding_models/lsun_ae.pkl"
         image_embed_model = LSUNAutoencoder()
-        image_embed_model.load_state_dict(torch.load(image_embed_model_ckpt, MAP_location=DEVICE))
+        image_embed_model.load_state_dict(torch.load(image_embed_model_ckpt, map_location=DEVICE))
         image_embed_model.eval()
 
         for param in image_embed_model.parameters():
@@ -490,12 +405,13 @@ if __name__ == '__main__':
     else:
         raise NotImplementedError(f"Check dataset name")
 
+    EXPT_ROOT = f"models/{experiment_id}"
     if not args.debug:
-        os.makedirs(f"models/{experiment_id}/", exist_ok=True)
-        print(f"Experiment information at models/{experiment_id}")
+        os.makedirs(f"{EXPT_ROOT}/", exist_ok=True)
+        print(f"Experiment information at {EXPT_ROOT}")
 
         logging.basicConfig(
-            filename=f"models/{experiment_id}/experiments.log",
+            filename=f"{EXPT_ROOT}/experiments.log",
             filemode="a+",
             level=logging.INFO,
             format="%(levelname)s (%(asctime)s): %(message)s",
@@ -527,9 +443,9 @@ if __name__ == '__main__':
 
     if not args.debug:
         import pickle
-        with open(f"models/{experiment_id}/args.pkl", "wb") as f:
+        with open(f"{EXPT_ROOT}/args.pkl", "wb") as f:
             pickle.dump(args, f)
-        with open(f"models/{experiment_id}/config.yaml", "w") as f:
+        with open(f"{EXPT_ROOT}/config.yaml", "w") as f:
             OmegaConf.save(main_conf, f)
 
     DATA_ROOT = f"final_data/{args.dataset}"
@@ -695,7 +611,7 @@ if __name__ == '__main__':
             raise NotImplementedError(f"Skip type {args.skip_type} not implemented")
         
         args.no_tokenize = True     # turn off input tokenization
-        with open(f"models/{experiment_id}/args.pkl", "wb") as f:
+        with open(f"{EXPT_ROOT}/args.pkl", "wb") as f:
             pickle.dump(args, f)
 
         embed_model = TransformInput(skip_transform)
@@ -990,7 +906,7 @@ if __name__ == '__main__':
 
         if not args.debug: save_models(model, scoremodel, embed_model, preembed_model, aggregator, latest=True)
 
-    model, scoremodel, embed_model, preembed_model, aggregator = load_models(name="best", expt_id=experiment_id, device=DEVICE)
+    model, scoremodel, embed_model, preembed_model, aggregator = load_models(name="best", expt_root=EXPT_ROOT, device=DEVICE, args=args)
     model.eval(), scoremodel.eval(), embed_model.eval(), preembed_model.eval()
     if DEEPSET:
         aggregator.eval()

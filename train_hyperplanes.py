@@ -1,10 +1,6 @@
 from train_prehash import *
 from torch.utils.data import DataLoader, TensorDataset
-
-
-class DummyDataset:
-    def __init__(self, arr):
-        self.c = arr
+from opas.data import DummyDataset
 
 
 @torch.no_grad()

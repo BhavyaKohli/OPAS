@@ -3,6 +3,15 @@ import torch
 import torch.nn as nn
 
 
+class TransformInput(nn.Module):
+    def __init__(self, transform):
+        super().__init__()
+        self.transform = transform
+
+    def forward(self, x):
+        return self.transform(x)
+
+
 class LamModel(nn.Module):
     def __init__(self, M, N, stagger):
         super().__init__()

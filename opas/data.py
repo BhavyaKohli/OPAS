@@ -6,6 +6,11 @@ import torch.nn.functional as F
 from torch.utils.data import Dataset, DataLoader
 
 
+class DummyDataset:
+    def __init__(self, arr):
+        self.c = arr
+
+
 class PairDatasetTrain(Dataset):
     def __init__(self, filepath, num_q=300, negative_exploration=800, seed=15):
         super().__init__()

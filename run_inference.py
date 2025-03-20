@@ -2,6 +2,7 @@ import os
 
 from main import *
 from opas.utils import get_opas_constants
+from opas.models.utils import load_models, get_image_embed_model
 
 
 @torch.no_grad()
@@ -75,37 +76,6 @@ def compute_metrics(dataset, model, scoremodel, embed_model, preembed_model, ima
     return mAP, mRR
 
 
-def load_models(name="best", expt_root=None, device="cpu"):
-    if expt_root is None:
-        raise ValueError("Please provide a valid experiment root folder in the inference script")
-
-    if name not in ["best", "last", "latest"]:
-        raise NotImplementedError("Only `best`, `last`, and `latest` models are supported")
-    
-    if name=="best":
-        suffix = ""
-    else:
-        suffix = f"_{name}"
-    
-    print(f"Loading `{name}` model")
-
-    model = torch.load(f"{expt_root}/model{suffix}.pt", map_location=device, weights_only=False)
-    scoremodel = torch.load(f"{expt_root}/scmodel{suffix}.pt", map_location=device, weights_only=False)
-    embed_model = torch.load(f"{expt_root}/embed_model{suffix}.pt", map_location=device, weights_only=False)
-    if os.path.exists(f"{expt_root}/preembed_model{suffix}.pt"):
-        preembed_model = torch.load(f"{expt_root}/preembed_model{suffix}.pt", map_location=device, weights_only=False)
-    else:
-        tokenize_transform = lambda x: tokenize(x, args)[0]
-        preembed_model = TransformInput(tokenize_transform).to(device)
-    
-    if os.path.exists(f"{expt_root}/aggregator{suffix}.pt"):
-        aggregator = torch.load(f"{expt_root}/aggregator{suffix}.pt", map_location=device, weights_only=False)
-    else:
-        aggregator = None
-
-    return model, scoremodel, embed_model, preembed_model, aggregator
-
-
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--expt_id", type=str, help="Experiment ID to load models from")
@@ -125,7 +95,7 @@ if __name__ == "__main__":
     with open(os.path.join(expt_root, "args.pkl"), "rb") as file:
         args = pickle.load(file)
 
-    model, scoremodel, embed_model, preembed_model, aggregator = load_models(name="best", expt_root=expt_root, device=DEVICE)
+    model, scoremodel, embed_model, preembed_model, aggregator = load_models(name="best", expt_root=expt_root, device=DEVICE, args=args)
     model.eval(), scoremodel.eval(), embed_model.eval(), preembed_model.eval()
     if aggregator is not None:
         aggregator.eval()
@@ -138,30 +108,7 @@ if __name__ == "__main__":
     DATA_ROOT = f"final_data/{dataset}"
     TEST_FILE = f"{DATA_ROOT}/dataset_test.hdf5"
 
-    image_embed_model = None
-    if "cifar" in dataset:
-        image_embed_model_ckpt = "data/image_sequence/embedding_models/cifar_ae.pkl"
-        image_embed_model = Autoencoder()
-        image_embed_model.load_state_dict(torch.load(image_embed_model_ckpt))
-        image_embed_model.eval()
-
-        for param in image_embed_model.parameters():
-            param.requires_grad = False
-
-        image_embed_model = image_embed_model.to(DEVICE)
-        TEST_FILE = f"{DATA_ROOT}/dataset_test_orig.hdf5"
-    
-    if "lsun" in dataset:
-        image_embed_model_ckpt = "data/image_sequence/embedding_models/lsun_ae.pkl"
-        image_embed_model = LSUNAutoencoder()
-        image_embed_model.load_state_dict(torch.load(image_embed_model_ckpt))
-        image_embed_model.eval()
-
-        for param in image_embed_model.parameters():
-            param.requires_grad = False
-
-        image_embed_model = image_embed_model.to(DEVICE)
-        TEST_FILE = f"{DATA_ROOT}/dataset_test_orig.hdf5"
+    image_embed_model, TEST_FILE = get_image_embed_model(dataset, [TEST_FILE], device=DEVICE)
 
     test_dataset = PairDatasetTest(TEST_FILE)
     print(f"test subset of dataset: \"{dataset}\" loaded from {TEST_FILE}")
