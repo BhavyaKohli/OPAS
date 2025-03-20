@@ -51,7 +51,7 @@ def compute_metrics(dataset, model, scoremodel, embed_model, preembed_model, ima
             netscore = 2*scoremodel(-allscores).squeeze()      # b
 
         else:
-            q = aggregator(q)
+            q = aggregator[0](q)
             # q is bd, C is Nd, we want bN scores
             # b1d - 1Nd = bNd --> sum across last dim to get bN scores
             netscore = 2 * F.sigmoid(-F.relu(q.unsqueeze(1) - C.unsqueeze(0)).sum(dim=-1))    # bN
