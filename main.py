@@ -24,9 +24,8 @@ from opas.models.deepset import DeepSetModel
 from opas.models.sortlrl import SortLRL
 from opas.models.model_utils import load_models
 
-from transformers import get_linear_schedule_with_warmup, AdamW
-
 from functools import partial
+from transformers import get_linear_schedule_with_warmup, AdamW
 
 import torchaudio.transforms as T
 
