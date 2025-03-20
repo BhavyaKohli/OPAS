@@ -36,16 +36,11 @@ def validation_map(dataset, qhasher, chasher):
     device = next(qhasher.parameters()).device
     C = chasher(dataset.c.to(device))
     Q = qhasher(dataset.q.to(device))
+    true_labels = dataset.lonehot.cpu()
 
-    true_labels = []
-    loader = dataset.get_dataloader(batch_size=150, shuffle=False)
-    for (q, l, gtl) in tqdm(loader, desc="Validation...", leave=False):
-        true_labels.append(l.to('cpu'))
-
-    true_labels = torch.vstack(true_labels)
-    netscores = F.cosine_similarity(Q.unsqueeze(1), C.unsqueeze(0), dim=-1).to('cpu')
-    import ipdb; ipdb.set_trace()
-    netscores = dataset.qcscores
+    netscores = F.cosine_similarity(Q.unsqueeze(1), C.unsqueeze(0), dim=-1).sigmoid().to('cpu')
+    # import ipdb; ipdb.set_trace()
+    # netscores = dataset.qcscores
 
     ranking = netscores.argsort(dim=1, descending=True)
     ranked_output = torch.gather(true_labels, dim=1, index=ranking)
@@ -86,6 +81,27 @@ class SortL(nn.Module):
         proj = (x @ self.alpha.T).squeeze(-1)
         proj = torch.sort(proj, dim=-1)
         return self.lin(proj.values)
+    
+
+def save_dataset_to_file(dataset, filepath):
+    q, c, l, lonehot, qcscores = dataset.q, dataset.c, dataset.l, dataset.lonehot, dataset.qcscores
+    torch.save({"q": q, "c": c, "l": l, "lonehot": lonehot, "qcscores": qcscores}, filepath)
+
+
+class LoadedDset(PairDatasetTest):
+    def __init__(self, filepath):
+        data = torch.load(filepath, map_location="cpu")
+        self.q = data["q"]
+        self.c = data["c"]
+        self.l = data["l"]
+        self.lonehot = data["lonehot"]
+        self.qcscores = data["qcscores"]
+    
+    def __getitem__(self, idx):
+        return self.q[idx], self.lonehot[idx], self.qcscores[idx]
+
+    def __len__(self):
+        return len(self.q)
 
 
 if __name__ == "__main__":
@@ -104,17 +120,7 @@ if __name__ == "__main__":
 
     # overrides
     args = OmegaConf.create(vars(args))
-    args = argparse.Namespace(**OmegaConf.merge(args, cli_args, base_conf))
-
-    model, scoremodel, embed_model, preembed_model, aggregator = load_models(name="best", expt_root=expt_root, device=DEVICE, args=args)
-    model.eval(), scoremodel.eval(), embed_model.eval(), preembed_model.eval()
-    if aggregator is not None:
-        aggregator.eval()
-
-    for m in [model, scoremodel, embed_model, preembed_model]:
-        for param in m.parameters():
-            param.requires_grad = False
-
+    args = argparse.Namespace(**OmegaConf.merge(args, base_conf, cli_args))
     DEBUG = getattr(args, "debug", False)
 
     ls = [int(l.split('_')[-1]) for l in os.listdir("hashing") if experiment_id in l and os.path.isdir(f"hashing/{l}")]
@@ -131,34 +137,49 @@ if __name__ == "__main__":
         print(f"Running with args: {args}")
     else:
         logger.add(sys.stdout, level="INFO", format="{time:D-MM-YYYY HH:mm:ss} | {level} | {message}")
-
+    
     logger.info("-"*100)
     logger.info("python " + " ".join(sys.argv))
     logger.info(f"Running with args: {args}")
-
+    
     dataset = args.dataset
     if dataset == "lsun384":
         dataset = "lsun"
-    DATA_ROOT = f"final_data/{dataset}"
-    TRAIN_FILE = f"{DATA_ROOT}/dataset_train.hdf5"
-    VAL_FILE = f"{DATA_ROOT}/dataset_val.hdf5"
-    TEST_FILE = f"{DATA_ROOT}/dataset_test.hdf5"
-
-    image_embed_model, TRAIN_FILE, VAL_FILE, TEST_FILE = get_image_embed_model(dataset, [TRAIN_FILE, VAL_FILE, TEST_FILE], device=DEVICE)
-    
-    # neg_expl = getattr(args, "neg_expl", 800)
-    # train_dataset = PairDatasetTrain(TRAIN_FILE, num_q=args.num_q, negative_exploration=neg_expl)
-    # val_dataset = PairDatasetTest(VAL_FILE)
-    # test_dataset = PairDatasetTest(TEST_FILE)
-
-    hasher = [nn.Identity(), nn.Identity()]
-    models = [model, scoremodel, embed_model, preembed_model, hasher]
-
+    DATA_ROOT = f"hashing"
+    TRAIN_FILE = f"{DATA_ROOT}/{dataset}_train_dset.pt"
+    VAL_FILE = f"{DATA_ROOT}/{dataset}_val_dset.pt"
+    TEST_FILE = f"{DATA_ROOT}/{dataset}_test_dset.pt"
 
     st = perf_counter()
-    train_dataset = PairDatasetTrainHPlane(TRAIN_FILE, models=models, args=args, num_q=args.num_q, negative_exploration=args.neg_expl)
-    val_dataset = PairDatasetTestHPlane(VAL_FILE, models=models, args=args)
-    # test_dataset = PairDatasetTestHPlane(TEST_FILE, models=models, args=args)
+    if not os.path.exists(TRAIN_FILE) or not os.path.exists(VAL_FILE) or not os.path.exists(TEST_FILE):
+        model, scoremodel, embed_model, preembed_model, aggregator = load_models(name="best", expt_root=expt_root, device=DEVICE, args=args)
+        model.eval(), scoremodel.eval(), embed_model.eval(), preembed_model.eval()
+        if aggregator is not None:
+            aggregator.eval()
+
+        for m in [model, scoremodel, embed_model, preembed_model]:
+            for param in m.parameters():
+                param.requires_grad = False
+
+        image_embed_model, TRAIN_FILE, VAL_FILE, TEST_FILE = get_image_embed_model(dataset, [TRAIN_FILE, VAL_FILE, TEST_FILE], device=DEVICE)
+    
+        hasher = [nn.Identity(), nn.Identity()]
+        models = [model, scoremodel, embed_model, preembed_model, hasher]
+
+        train_dataset = PairDatasetTestHPlane(TRAIN_FILE, models=models, args=args) #, num_q=args.num_q, negative_exploration=args.neg_expl)
+        val_dataset = PairDatasetTestHPlane(VAL_FILE, models=models, args=args)
+        test_dataset = PairDatasetTestHPlane(TEST_FILE, models=models, args=args)
+
+        save_dataset_to_file(train_dataset, TRAIN_FILE)
+        save_dataset_to_file(val_dataset, VAL_FILE)
+        save_dataset_to_file(test_dataset, TEST_FILE)
+    
+    else:
+        logger.info("Loading datasets from files")
+        train_dataset = LoadedDset(TRAIN_FILE)
+        val_dataset = LoadedDset(VAL_FILE)
+        test_dataset = LoadedDset(TEST_FILE)
+        
     print(f"Datasets loaded in {perf_counter() - st:.3f}s")
 
     trainloader = train_dataset.get_dataloader(batch_size=args.batch_size, shuffle=True)
@@ -166,6 +187,8 @@ if __name__ == "__main__":
     positive_samples = getattr(args, "pos_samps", 10)
     M = train_dataset.q[0].shape[0]
     N = train_dataset.c[0].shape[0]
+
+    torch.cuda.empty_cache()
 
     hasher_type = getattr(args, "hasher_type", "SortLRL")
     if hasher_type == "SortLRL":        # outdim, latent used for inner LRL model
@@ -188,8 +211,8 @@ if __name__ == "__main__":
             chasher = qhasher
     hasher = nn.ModuleList([qhasher, chasher])  # grouped so we can use a single optimizer
 
-    optimizer = torch.optim.Adam(hasher.parameters(), lr=args.lr, weight_decay=1e-4)
-    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode="max", factor=0.9, patience=5)
+    optimizer = torch.optim.AdamW(hasher.parameters(), lr=args.lr)
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode="max", factor=0.95, patience=5, min_lr=1e-5)
     # criterion = lambda q, c, l: F.cosine_embedding_loss(q, c, l, margin=args.hash_margin)
     # criterion = lambda q, c, l: F.cross_entropy(0.5 * (F.cosine_similarity(q, c) + 1), l)
     # criterion = lambda q, c, l: nn.BCELoss()(0.5 * (F.cosine_similarity(q, c) + 1), l)
@@ -204,35 +227,46 @@ if __name__ == "__main__":
 
     criterion = partial(LOSS_ON_SILVER, loss=getattr(args, "loss_type", "bce"))
         
+    sample_scores = getattr(args, "sample_scores", False)
+    total_exploration = getattr(args, "total_exploration", 500)
     pbar = tqdm(range(1,args.nepochs+1,1), disable=False)
     best_val_map = 0
     es = 0
     for epoch in pbar:
         inner_pbar = tqdm(trainloader, disable=False, leave=False)
-        val_map, val_mrr = validation_map(val_dataset, qhasher, chasher)
 
         hasher.train()
         losses = []
-        for n, (q, c, l) in enumerate(inner_pbar):
-            optimizer.zero_grad()
-            qpos, cpos, lpos = train_dataset.get_positive_samples(positive_samples)
-            
-            q = torch.cat((q, qpos), dim=0).to(DEVICE)
-            c = torch.cat((c, cpos), dim=0).to(DEVICE)
-            l = torch.cat((l, lpos), dim=0).float().to(DEVICE)
+        for n, (q, l, gtl) in enumerate(inner_pbar):
+            q = q.to(DEVICE)
+            gtl = gtl.to(DEVICE)
+            c = train_dataset.c.to(DEVICE)
             # q: (batch_size, M, indim)
-            # c: (batch_size, N, indim)
-            # l: (batch_size)
+            # c: (len(train_dataset), N, indim)
+            # gtl: (batch_size, len(train_dataset))
 
-            # q = q + batch_get_white_noise(q, args.SNR)
-            # q = batch_fwd_q(q)
-            
             q, c = qhasher(q), chasher(c)
             # q: (batch_size, outdim)
-            # c: (batch_size, outdim)
+            # c: (len(train_dataset), outdim)
 
-            loss = criterion(q, c, l)
+            scores = F.cosine_similarity(q.unsqueeze(1), c.unsqueeze(0), dim=-1).sigmoid()
+            # scores: (batch_size, len(train_dataset))
 
+            if sample_scores:
+                idxs = []
+                for i in range(len(l)):
+                    pos = torch.where(l[i] == 1)[0]
+                    neg = torch.where(l[i] == 0)[0]
+                    neg = neg[torch.randperm(len(neg))[:total_exploration - len(pos)]]
+                    idxs.append(torch.cat((pos, neg)))
+                idxs = torch.stack(idxs)
+            
+                scores = torch.gather(scores, 1, idxs)
+                gtl = torch.gather(gtl, 1, idxs)
+                
+            loss = F.mse_loss(scores, gtl, reduction='sum')
+
+            optimizer.zero_grad()
             loss.backward()
             optimizer.step()
             losses.append(loss.item())
@@ -242,7 +276,11 @@ if __name__ == "__main__":
 
         hasher.eval()
         val_map, val_mrr = validation_map(val_dataset, qhasher, chasher)
-        # scheduler.step(val_map)
+        # if epoch == 10:
+        #     import ipdb; ipdb.set_trace()
+        #     logger.info(validation_map(train_dataset, qhasher, chasher))
+        #     raise
+        scheduler.step(val_map)
 
         if val_map >= best_val_map + 1e-8:
             best_val_map = val_map
@@ -263,7 +301,7 @@ if __name__ == "__main__":
 
     hasher.load_state_dict(bestwts)
     hasher.eval()
-    test_map, test_mrr = validation_map(test_dataset, qhasher, chasher, batch_fwd_q)
+    test_map, test_mrr = validation_map(test_dataset, qhasher, chasher)
     logstr = f"Test MAP: {test_map:.4f}, Test MRR: {test_mrr:.4f}"
     print(logstr)
     logger.info(logstr)    
