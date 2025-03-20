@@ -1,75 +1,36 @@
-import wandb
-import numpy as np
 import h5py
 import logging
 import os, sys
 import argparse
+import numpy as np
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+from tqdm import tqdm
 from datetime import datetime
-from tqdm.auto import tqdm
+from omegaconf import OmegaConf
 
-from opas.tstok.tokenizer import Tokenizer
-from opas.utils import AttributeDict, gumbel_sinkhorn, normalize, get_opas_constants
+from opas.tstok.tsutils import TOKENIZER, tokenize, batch_get_white_noise
+from opas.utils import AttributeDict, gumbel_sinkhorn, normalize, get_opas_constants, seed_everything
 from opas.data import PairDatasetTrain, PairDatasetTest
 
-from opas.models.main import LamModel, ScoreModel, PositionalEncoding
+from opas.models.main import LamModel, ScoreModel, PositionalEncoding, TransformInput
 from opas.models.cifar_embed import Autoencoder
 from opas.models.lsun_embed import Autoencoder as LSUNAutoencoder
 from opas.models.ts_encoders import Conv1dTS, EncConv1dTS, MelConv1dTS
 from opas.models.deepset import DeepSetModel
-
-from transformers import get_linear_schedule_with_warmup, AdamW
+from opas.models.sortlrl import SortLRL
+from opas.models.model_utils import load_models
 
 from functools import partial
+from transformers import get_linear_schedule_with_warmup, AdamW
 
 import torchaudio.transforms as T
 
 
-def get_tokenizer():
-    data_config = AttributeDict({
-        "max_seq_len": 160,
-        "batch_size": 64,
-        "bin_size": 0.005,
-        "max_coverage": .9998,
-        "vocab_size": 512
-    })
-    tokenizer = Tokenizer(data_config)
-    
-    return tokenizer
-
-TOKENIZER = get_tokenizer()
-
-
-def tokenize(x, args):
-    if args.no_tokenize:
-        return x, None
-        
-    orig_shape = x.shape
-    device = x.device
-    x = x.squeeze().cpu()
-    if len(x.shape) == 3:
-        x = x.reshape(-1, orig_shape[-1])   
-    ids, p = TOKENIZER.encode(x)
-    ids = torch.from_numpy(ids).long()
-    ids = ids.reshape(orig_shape)
-    return ids.to(device), p
-
-
-def get_white_noise(signal, SNR):
-    RMS_s = torch.sqrt(torch.mean(signal**2))
-    RMS_n = torch.sqrt(RMS_s**2 / (pow(10, SNR/10)))
-    STD_n = RMS_n
-    noise = torch.distributions.Normal(0, STD_n).sample(signal.shape)
-    return noise
-
-
-def batch_get_white_noise(x, SNR):
-    # x is B x m/n x signal
-    return get_white_noise(x, SNR)
+tqdm = partial(tqdm, ncols=150)
 
 
 def stagger_and_concat(model_inputs, num_stagger=1):
@@ -96,15 +57,6 @@ class Attention_Layer(nn.Module):
         w = self.w(X)
         output = F.softmax(torch.mul(X, w), dim=1)
         return output
-    
-
-class TransformInput(nn.Module):
-    def __init__(self, transform):
-        super().__init__()
-        self.transform = transform
-
-    def forward(self, x):
-        return self.transform(x)
 
 
 @torch.no_grad()
@@ -125,16 +77,19 @@ def embed_if_image_and_normalize(c, image_embed_model=None):
     return normalize(c)
 
 
-def embed_full_corpus(dataset, embed_model, preembed_model, image_embed_model=None, inner_batch_size=800, aggregator=None):
-    C = torch.from_numpy(dataset.c).float()
+@torch.no_grad()
+def embed_full_corpus(dataset, embed_model, preembed_model, image_embed_model=None, inner_batch_size=800, aggregator=None, verbose=False):
+    C = dataset.c
+    if not isinstance(C, torch.Tensor):
+        C = torch.from_numpy(C).float()    
     Cembed = []
-    for batch in tqdm(range(0, len(C), inner_batch_size), disable=True):
+    for batch in tqdm(range(0, len(C), inner_batch_size), disable=not verbose, leave=False, desc="Embedding..."):
         c = C[batch:batch+inner_batch_size].to(next(embed_model.parameters()).device)
         c = embed_if_image_and_normalize(c, image_embed_model)
         c = embed_model(preembed_model(c))
         c = normalize(c)
         if aggregator is not None:
-            c = aggregator(c)
+            c = aggregator[1](c)
         Cembed.append(c)
     C = torch.vstack(Cembed)
     return C
@@ -143,7 +98,7 @@ def embed_full_corpus(dataset, embed_model, preembed_model, image_embed_model=No
 @torch.no_grad()
 def compute_metrics(dataset, model, scoremodel, embed_model, preembed_model, image_embed_model=None, stagger=2, verbose=False, aggregator=None):
 
-    loader = dataset.get_dataloader(batch_size=200, shuffle=True)
+    loader = dataset.get_dataloader(batch_size=150, shuffle=True)
 
     C = embed_full_corpus(dataset, embed_model, preembed_model, image_embed_model=image_embed_model, aggregator=aggregator)
     # C is (N, n, xoutdim)
@@ -159,38 +114,52 @@ def compute_metrics(dataset, model, scoremodel, embed_model, preembed_model, ima
         q = normalize(q)
         # q is (b, m, xoutdim)
         if aggregator is None:
-            qct = torch.einsum("bmd,Nnd->bNmn", q, C)
-            if args.use_linear_lammodel:
-                lambdas = []
-                for xx in range(len(q)):
-                    q_ = q[xx].unsqueeze(0)
-                    q_ = q_.repeat_interleave(C.shape[0], dim=0)
-                    lambdas_ = model(torch.cat((q_, C), dim=1).flatten(start_dim=1)).unsqueeze(-1)
-                    lambdas.append(lambdas_)
-                lambdas = torch.stack(lambdas)
+            if not NOLAMMODEL:
+                qct = torch.einsum("bmd,Nnd->bNmn", q, C)   # verified
+                if args.use_linear_lammodel:
+                    lambdas = []
+                    for xx in range(len(q)):
+                        q_ = q[xx].unsqueeze(0)
+                        q_ = q_.repeat_interleave(C.shape[0], dim=0)
+                        lambdas_ = model(torch.cat((q_, C), dim=1).flatten(start_dim=1)).unsqueeze(-1)
+                        lambdas.append(lambdas_)
+                    lambdas = torch.stack(lambdas)
+                else:
+                    model_inputs = stagger_and_concat(qct, num_stagger=stagger)
+                    if stagger==0: 
+                        model_inputs = model_inputs.squeeze(1)
+                    lambdas = torch.stack([model(x) for x in model_inputs])
+                
+                F_mat = Rm_mat.T @ (2*qct + (a_vec @ lambdas.transpose(2,3) @ A_mat).transpose(2,3))
+                del qct
             else:
-                model_inputs = stagger_and_concat(qct, num_stagger=stagger)
-                if stagger==0: 
-                    model_inputs = model_inputs.squeeze(1)
-                lambdas = torch.stack([model(x) for x in model_inputs])
-            
-            F_mat = Rm_mat.T @ (2*qct + (a_vec @ lambdas.transpose(2,3) @ A_mat).transpose(2,3))
+                F_mat = Rm_mat.T @ (
+                    torch.stack([-(q[i][None].unsqueeze(2) - C.unsqueeze(1)).relu().sum(-1) for i in range(len(q))])
+                )
+                lambdas = torch.ones((len(q), len(C), M, 1), device=F_mat.device)
 
             P = gumbel_sinkhorn(F_mat, CFG.tau, CFG.n_sink_iter, noise=False)
 
             RmPC = Rm_mat @ P @ C.squeeze(-1)
 
-            lamscore = lamwt * (lambdas.transpose(2,3) @ F.relu(b-A_mat @ Rm_mat @ P @ a_vec)).squeeze()
+            if args.no_lamrelu:
+                lamscore = lamwt * (lambdas.transpose(2,3) @ (b-A_mat @ Rm_mat @ P @ a_vec)).squeeze()
+            else:
+                lamscore = lamwt * (lambdas.transpose(2,3) @ F.relu(b-A_mat @ Rm_mat @ P @ a_vec)).squeeze()
             normscore = torch.norm(q.unsqueeze(1) - RmPC, dim=[-1,-2])
 
             allscores = torch.stack([lamscore, normscore], dim=2)
             netscore = 2*scoremodel(-allscores).squeeze()      # b
+            del P, F_mat, RmPC, q
 
         else:
-            q = aggregator(q)
+            q = aggregator[0](q)
             # q is bd, C is Nd, we want bN scores
             # b1d - 1Nd = bNd --> sum across last dim to get bN scores
             netscore = 2 * F.sigmoid(-F.relu(q.unsqueeze(1) - C.unsqueeze(0)).sum(dim=-1))    # bN
+            # TODO: fix this
+            if args.deepset_mode == "cosine":     # 3
+                netscore = 0.5 * (F.cosine_similarity(q.unsqueeze(1), C.unsqueeze(0), dim=-1) + 1)
 
         netscores.append(netscore.to('cpu'))
         true_labels.append(l.to('cpu'))
@@ -201,14 +170,14 @@ def compute_metrics(dataset, model, scoremodel, embed_model, preembed_model, ima
     ranking = netscores.argsort(dim=1, descending=True)
     ranked_output = torch.gather(true_labels, dim=1, index=ranking)
 
-    mRR = (1 / (ranked_output.argmax(dim=1) + 1)).mean().item()
+    MRR = (1 / (ranked_output.argmax(dim=1) + 1)).mean().item()
 
-    mAP = (torch.cumsum(ranked_output, dim=1) * ranked_output).float()
-    mAP /= (torch.arange(ranked_output.shape[1]) + 1)
-    mAP /= torch.sum(ranked_output, dim=1, keepdim=True)
-    mAP = mAP.sum(dim=1).mean().item()
+    MAP = (torch.cumsum(ranked_output, dim=1) * ranked_output).float()
+    MAP /= (torch.arange(ranked_output.shape[1]) + 1)
+    MAP /= torch.sum(ranked_output, dim=1, keepdim=True)
+    MAP = MAP.sum(dim=1).mean().item()
 
-    return mAP, mRR
+    return MAP, MRR
 
 @torch.no_grad()
 def compute_metrics_sing(dataset, model, scoremodel, embed_model, preembed_model, stagger=2, verbose=False):
@@ -236,7 +205,7 @@ def compute_metrics_sing(dataset, model, scoremodel, embed_model, preembed_model
             q, c = qc[:, :M], qc[:, M:]
             q, c = normalize(q, c)
 
-            qct = torch.einsum("bmd,bnd->bmn", q, c)
+            qct = torch.einsum("bmd,bnd->bmn", q, c)    # verified
             model_inputs = stagger_and_concat(qct, num_stagger=stagger)
             
             lambdas = model(model_inputs)
@@ -244,7 +213,8 @@ def compute_metrics_sing(dataset, model, scoremodel, embed_model, preembed_model
             F_mat = Rm_mat.T @ (2*qct + (a_vec @ lambdas.transpose(1,2) @ A_mat).transpose(1,2))
 
             P = gumbel_sinkhorn(F_mat, CFG.tau, CFG.n_sink_iter, noise=False)
-            RmPC = torch.einsum("mn,bnn,bnd->bmd", Rm_mat, P, c)
+            # RmPC = torch.einsum("mn,bnn,bnd->bmd", Rm_mat, P, c)    # sanity fail
+            RmPC = Rm_mat @ torch.bmm(P, c)
 
             lamscore = lamwt * (lambdas.transpose(1,2) @ F.relu(b-A_mat @ Rm_mat @ P @ a_vec)).squeeze()
             normscore = torch.norm(q - RmPC, dim=[1,2])
@@ -261,14 +231,14 @@ def compute_metrics_sing(dataset, model, scoremodel, embed_model, preembed_model
     ranking = netscores.argsort(dim=1, descending=True)
     ranked_output = torch.gather(true_labels, dim=1, index=ranking)
 
-    mRR = (1 / (ranked_output.argmax(dim=1) + 1)).mean().item()
+    MRR = (1 / (ranked_output.argmax(dim=1) + 1)).mean().item()
 
-    mAP = (torch.cumsum(ranked_output, dim=1) * ranked_output).float()
-    mAP /= (torch.arange(ranked_output.shape[1]) + 1)
-    mAP /= torch.sum(ranked_output, dim=1, keepdim=True)
-    mAP = mAP.sum(dim=1).mean().item()
+    MAP = (torch.cumsum(ranked_output, dim=1) * ranked_output).float()
+    MAP /= (torch.arange(ranked_output.shape[1]) + 1)
+    MAP /= torch.sum(ranked_output, dim=1, keepdim=True)
+    MAP = MAP.sum(dim=1).mean().item()
 
-    return mAP, mRR
+    return MAP, MRR
 
 
 @torch.no_grad()
@@ -299,7 +269,7 @@ def compute_odr(dataset, model, scoremodel, embed_model, preembed_model, image_e
         q = normalize(q)
         # q is (b, m, xoutdim)
 
-        qct = torch.einsum("bmd,Nnd->bNmn", q, true_c)
+        qct = torch.einsum("bmd,Nnd->bNmn", q, true_c)  # verified
         model_inputs = stagger_and_concat(qct, num_stagger=stagger) # bNsmn  s = num_stagger+1
 
         lambdas = torch.stack([model(x) for x in model_inputs])
@@ -330,13 +300,13 @@ def save_models(model, scoremodel, embed_model, preembed_model, aggregator=None,
     if final:
         suffix = "_last"
         try:
-            os.remove(f"models/{experiment_id}/model_latest.pt")
-            os.remove(f"models/{experiment_id}/scmodel_latest.pt")
-            os.remove(f"models/{experiment_id}/embed_model_latest.pt")
+            os.remove(f"{EXPT_ROOT}/model_latest.pt")
+            os.remove(f"{EXPT_ROOT}/scmodel_latest.pt")
+            os.remove(f"{EXPT_ROOT}/embed_model_latest.pt")
             if args.preembed != "tokenize":
-                os.remove(f"models/{experiment_id}/preembed_model_latest.pt")
+                os.remove(f"{EXPT_ROOT}/preembed_model_latest.pt")
             if aggregator is not None:
-                os.remove(f"models/{experiment_id}/aggregator_latest.pt")
+                os.remove(f"{EXPT_ROOT}/aggregator_latest.pt")
         except:
             print("Couldn't delete `latest` models")
     elif latest:
@@ -345,95 +315,56 @@ def save_models(model, scoremodel, embed_model, preembed_model, aggregator=None,
         suffix = ""
     
     logging.info(f"Saving models... experiment id: {experiment_id}")
-    torch.save(model, f"models/{experiment_id}/model{suffix}.pt")
-    torch.save(scoremodel, f"models/{experiment_id}/scmodel{suffix}.pt")
-    torch.save(embed_model, f"models/{experiment_id}/embed_model{suffix}.pt")
+    torch.save(model, f"{EXPT_ROOT}/model{suffix}.pt")
+    torch.save(scoremodel, f"{EXPT_ROOT}/scmodel{suffix}.pt")
+    torch.save(embed_model, f"{EXPT_ROOT}/embed_model{suffix}.pt")
     if args.preembed != "tokenize":
-        torch.save(preembed_model, f"models/{experiment_id}/preembed_model{suffix}.pt")
+        torch.save(preembed_model, f"{EXPT_ROOT}/preembed_model{suffix}.pt")
     if aggregator is not None:
-        torch.save(aggregator, f"models/{experiment_id}/aggregator{suffix}.pt")
+        torch.save(aggregator, f"{EXPT_ROOT}/aggregator{suffix}.pt")
 
 
-def load_models(name="best", expt_id=None, device="cpu"):
-    if expt_id is None:
-        expt_id = experiment_id
-
-    if name not in ["best", "last", "latest"]:
-        raise NotImplementedError("Only `best`, `last`, and `latest` models are supported")
+class LRLModel(nn.Module):
+    def __init__(self, indim, seq_len, latent, outdim):
+        super().__init__()
+        self.lrl = nn.Sequential(
+            nn.Linear(indim * seq_len, latent),
+            nn.ReLU(),
+            nn.Linear(latent, outdim)
+        )
     
-    if name=="best":
-        suffix = ""
-    else:
-        suffix = f"_{name}"
-    
-    print(f"Loading `{name}` model")
-
-    model = torch.load(f"models/{expt_id}/model{suffix}.pt", map_location=device)
-    scoremodel = torch.load(f"models/{expt_id}/scmodel{suffix}.pt", map_location=device)
-    embed_model = torch.load(f"models/{expt_id}/embed_model{suffix}.pt", map_location=device)
-    if os.path.exists(f"models/{expt_id}/preembed_model{suffix}.pt"):
-        preembed_model = torch.load(f"models/{expt_id}/preembed_model{suffix}.pt", map_location=device)
-    else:
-        tokenize_transform = lambda x: tokenize(x, args)[0]
-        preembed_model = TransformInput(tokenize_transform).to(device)
-    
-    if os.path.exists(f"models/{expt_id}/aggregator{suffix}.pt"):
-        aggregator = torch.load(f"models/{expt_id}/aggregator{suffix}.pt", map_location=device)
-    else:
-        aggregator = None
-
-    return model, scoremodel, embed_model, preembed_model, aggregator
+    def forward(self, x):
+        return self.lrl(x.flatten(start_dim=1))
 
 
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser()
+    cli_conf = OmegaConf.from_cli()
+    dataset = cli_conf.dataset
+    if "audio" in dataset:
+        spec_conf = OmegaConf.load("configs/audio.yaml")
+    elif "speech" in dataset:
+        spec_conf = OmegaConf.load("configs/speech.yaml")
+    elif "cifar" in dataset:
+        spec_conf = OmegaConf.load("configs/cifar.yaml")
+    elif "lsun" in dataset:
+        spec_conf = OmegaConf.load("configs/lsun.yaml")
+    else:
+        raise NotImplementedError(f"Check dataset name")
+    
+    if cli_conf.get("config", None):
+        extra = OmegaConf.load(cli_conf.config)
+        spec_conf = OmegaConf.merge(spec_conf, extra)
 
-    parser.add_argument("--dataset", type=str, required=True, help="name of dataset, stored in `final_data/`")
-    parser.add_argument("--print_dataset", action="store_true", help="prints dataset array shapes when passed")
-    parser.add_argument("--num_q", type=int, default=300, help="number of queries to be sampled from the dataset")
-    parser.add_argument("--wandb_log", action="store_true", help="whether to log to wandb")
+    base_conf = OmegaConf.load("configs/base.yaml")
+    main_conf = OmegaConf.merge(base_conf, spec_conf, cli_conf)
+    args = argparse.Namespace(**main_conf)
 
-    parser.add_argument("--b", type=float, default=1.0, help="hinge margin for negative gap penalty (b-Apa)")
-    parser.add_argument("--b1", type=float, default=0.0, help="hinge margin for positive gap penalty (Apa-b)")
-    parser.add_argument("--delta", type=float, default=0.7, help="hinge margin for contrastive loss")
-    parser.add_argument("--stagger", type=int, default=0, help="number of staggers when creating model input")
-    parser.add_argument("--lamwt", type=float, default=1e-2, help="loss coefficient for negative gap penalty")
-    parser.add_argument("--gapwt", type=float, default=0.0, help="loss coefficient for positive gap penalty")
-    parser.add_argument("--SNR", type=int, default=1, help="input white noise SNR")
-    parser.add_argument("--noise", type=float, default=0, help="input white noise")
-    parser.add_argument("--preembed", type=str, help="pre-embed model to use (tokenize, linear, conv, none)")
+    DEVICE = f'cuda:{args.device}' if torch.cuda.is_available() else 'cpu'
 
-    parser.add_argument("--lr", type=float, default=5e-4, help="learning rate")
-    parser.add_argument("--nepochs", type=int, default=30, help="number of epochs")
-    parser.add_argument("--device", type=int, default=0, help="CUDA device to use (default: 0)")
-    parser.add_argument("--batch_size", type=int, default=200, help="batch size for training")
-
-    parser.add_argument("--xnhead", type=int, default=4, help="nhead for transformer encoder layer")
-    parser.add_argument("--xnumlayers", type=int, default=2, help="num layers for transformer encoder")
-    parser.add_argument("--xoutdim", type=int, default=128, help="out dim for transformer encoder model (4000 -> outdim)")
-    parser.add_argument("--xlr", type=float, default=1e-5, help="learning rate for transformer encoder model")
-    parser.add_argument("--xwarmupepochs", type=int, default=20, help="warmup epochs for transformer encoder model")
-    parser.add_argument("--xff", type=int, default=2048, help="feedforward dim of transformer encoder model")
-
-    parser.add_argument("--use_sing_xfmer", action="store_true", help="pass when a single transformer is to be used, for both q and c")
-    parser.add_argument("--no_tokenize", action="store_true", help="pass when transformer pre-inputs should NOT be tokenized")
-    parser.add_argument("--enforce_order", action="store_true", help="pass when enforce order during training")
-    parser.add_argument("--skip_embed", action="store_true", help="pass to skip embed_model completely (embed_model will be replaced with nn.Identity())")
-    parser.add_argument("--train_with_orig", action="store_true", help="when using the cifar or lsun datasets, pass this when training should be done using the original images and not the embeddings directly (not recommended for LSUN)")
-    parser.add_argument("--deepset", action="store_true", help="pass when query and corpus sequences are to be embedded into the same latent space, for using a (hq-hc)+ loss instead of the usual sinkhorn->permutation->normscore+lamscore components")
-    parser.add_argument("--add_attention", action="store_true", help="[unused in current script version] pass when an additional attention module is required before the Xfmer")
-    parser.add_argument("--lfcc", action="store_true", help="[unused in current script version] pass when LFCC features should be used in place of audio")
-
-    # sinkhorn params
-    parser.add_argument("--n_sink_iter", type=int, default=20, help="number of sinkhorn iterations")
-    parser.add_argument("--single_step_norm", type=int, default=-1, choices=[-1,1,2], help="controls how P is obtained from F during training. -1 means no single step normalization (sinkhorn iterations), 1 means single step normalization using sum, 2 means single step normalization using exp (attn)")
-
-    # post-review
-    parser.add_argument("--internal_lamwt", type=float, default=1, help="coefficient for A^T @ lambda @ a^T inside F_mat")
-    parser.add_argument("--use_linear_lammodel", action="store_true", help="pass when a linear model should be used for lambda instead of a transformer")
-    parser.add_argument("--debug_mode", action="store_true", help="no logging to file")
-
-    args = parser.parse_args()
+    if args.reproducible:
+        os.environ["CUBLAS_WORKSPACE_CONFIG"] = ":4096:8"
+        # torch.use_deterministic_algorithms(True)    #causes .backward() issues with adaptive pooling
+    seed_everything(args.seed)
 
     experiment_id = datetime.now().strftime("%d%m%H%M")
     args.human = args.video = args.cifar = args.lsun = False
@@ -441,8 +372,9 @@ if __name__ == '__main__':
     if "audio" in args.dataset:
         experiment_id = f"A{experiment_id}" 
     elif "human" in args.dataset or "speech" in args.dataset:
+        args.speech = True
         args.human = True
-        experiment_id = f"AH{experiment_id}"
+        experiment_id = f"S{experiment_id}"
     elif "video" in args.dataset:
         args.video = True
         experiment_id = f"V{experiment_id}"
@@ -451,7 +383,7 @@ if __name__ == '__main__':
         experiment_id = f"C{experiment_id}" 
         image_embed_model_ckpt = "data/image_sequence/embedding_models/cifar_ae.pkl"
         image_embed_model = Autoencoder()
-        image_embed_model.load_state_dict(torch.load(image_embed_model_ckpt))
+        image_embed_model.load_state_dict(torch.load(image_embed_model_ckpt, map_location=DEVICE))
         image_embed_model.eval()
 
         for param in image_embed_model.parameters():
@@ -463,7 +395,7 @@ if __name__ == '__main__':
 
         image_embed_model_ckpt = "data/image_sequence/embedding_models/lsun_ae.pkl"
         image_embed_model = LSUNAutoencoder()
-        image_embed_model.load_state_dict(torch.load(image_embed_model_ckpt))
+        image_embed_model.load_state_dict(torch.load(image_embed_model_ckpt, map_location=DEVICE))
         image_embed_model.eval()
 
         for param in image_embed_model.parameters():
@@ -472,12 +404,13 @@ if __name__ == '__main__':
     else:
         raise NotImplementedError(f"Check dataset name")
 
-    if not args.debug_mode:
-        os.makedirs(f"models/{experiment_id}/", exist_ok=True)
-        print(f"Experiment information at models/{experiment_id}")
+    EXPT_ROOT = f"models/{experiment_id}"
+    if not args.debug:
+        os.makedirs(f"{EXPT_ROOT}/", exist_ok=True)
+        print(f"Experiment information at {EXPT_ROOT}")
 
         logging.basicConfig(
-            filename=f"models/{experiment_id}/experiments.log",
+            filename=f"{EXPT_ROOT}/experiments.log",
             filemode="a+",
             level=logging.INFO,
             format="%(levelname)s (%(asctime)s): %(message)s",
@@ -488,7 +421,8 @@ if __name__ == '__main__':
     logging.info(f"Running with args: {args}")
     print(f"Running with args: {args}")
 
-    DEVICE = f'cuda:{args.device}' if torch.cuda.is_available() else 'cpu'
+    NOLAMMODEL = args.no_lammodel
+
     if args.cifar or args.lsun:
         image_embed_model = image_embed_model.to(DEVICE)
     logging.info(f"Using device = {DEVICE}")
@@ -506,10 +440,12 @@ if __name__ == '__main__':
 
     logging.info(f"Dataset in use : {args.dataset}")
 
-    if not args.debug_mode:
+    if not args.debug:
         import pickle
-        with open(f"models/{experiment_id}/args.pkl", "wb") as f:
+        with open(f"{EXPT_ROOT}/args.pkl", "wb") as f:
             pickle.dump(args, f)
+        with open(f"{EXPT_ROOT}/config.yaml", "w") as f:
+            OmegaConf.save(main_conf, f)
 
     DATA_ROOT = f"final_data/{args.dataset}"
 
@@ -558,7 +494,7 @@ if __name__ == '__main__':
     batch_size = args.batch_size
     positive_samples = 10
 
-    neg_expl = 300 if getattr(args, "video", None) else 800
+    neg_expl = args.neg_expl
 
     train_dataset = PairDatasetTrain(TRAIN_FILE, num_q=args.num_q, negative_exploration=neg_expl, seed=15)
     trainloader = train_dataset.get_dataloader(batch_size=batch_size, shuffle=True)
@@ -582,7 +518,8 @@ if __name__ == '__main__':
     internal_lamwt = getattr(args, "internal_lamwt", 1)
     ####################
 
-    if args.wandb_log : 
+    if args.wandb_log:
+        import wandb 
         wandb.init(
             # set the wandb project where this run will be logged
             project = "Opas - Experiments",
@@ -660,16 +597,23 @@ if __name__ == '__main__':
 
     if args.skip_embed:
         d_model = args.xoutdim
-        lin_transform = nn.Sequential(
-            nn.Linear(samp_rate, d_model),
-            nn.ReLU(),
-            nn.Linear(d_model, d_model),
-        )
+        
+        if args.skip_type == "lin":
+            skip_transform = nn.Sequential(
+                nn.Linear(samp_rate, d_model),
+                nn.ReLU(),
+                nn.Linear(d_model, d_model),
+            )
+        elif args.skip_type == "conv":
+            skip_transform = Conv1dTS(n_ch=4, latent=d_model)
+        else:
+            raise NotImplementedError(f"Skip type {args.skip_type} not implemented")
+        
         args.no_tokenize = True     # turn off input tokenization
-        with open(f"models/{experiment_id}/args.pkl", "wb") as f:
+        with open(f"{EXPT_ROOT}/args.pkl", "wb") as f:
             pickle.dump(args, f)
 
-        embed_model = TransformInput(lin_transform)
+        embed_model = TransformInput(skip_transform)
         embed_model = embed_model.to(DEVICE)
         preembed_model = TransformInput(nn.Identity())
         preembed_model.dummy_param = nn.Parameter(torch.empty(20), requires_grad=True)
@@ -687,8 +631,20 @@ if __name__ == '__main__':
         attention_model = None
 
     if DEEPSET:
-        aggregator = DeepSetModel(indim=args.xoutdim, latent=args.xoutdim//2, outdim=args.xoutdim//2).to(DEVICE)
-        aggregator_optimizer = torch.optim.Adam(aggregator.parameters(), lr=args.lr, weight_decay=1e-5)
+        use_sort_lrl = getattr(args, "use_sort_lrl", False)
+        use_lrl_embed = getattr(args, "use_lrl_embed", False)
+        if use_sort_lrl:
+            qsort = SortLRL(args.xoutdim, seq_len=M, latent=args.xff, outdim=args.xoutdim).to(DEVICE)
+            csort = SortLRL(args.xoutdim, seq_len=N, latent=args.xff, outdim=args.xoutdim).to(DEVICE)
+            aggregator = nn.ModuleList([qsort, csort])
+        elif use_lrl_embed:
+            qembed = LRLModel(indim=args.xoutdim, seq_len=M, latent=args.xff, outdim=args.xoutdim).to(DEVICE)
+            cembed = LRLModel(indim=args.xoutdim, seq_len=N, latent=args.xff, outdim=args.xoutdim).to(DEVICE)
+            aggregator = nn.ModuleList([qembed, cembed])
+        else:
+            deepset = DeepSetModel(indim=args.xoutdim, latent=args.xoutdim//2, outdim=args.xoutdim//2).to(DEVICE)
+            aggregator = nn.ModuleList([deepset, deepset])
+        aggregator_optimizer = torch.optim.Adam(aggregator.parameters(), lr=getattr(args, "agglr", args.lr), weight_decay=1e-5)
     else:
         aggregator = None
 
@@ -708,12 +664,89 @@ if __name__ == '__main__':
         TRANSFORM = lambda x: x
     ################ NOT USED ######################
 
+    if args.pretrain_embedding:
+        from copy import deepcopy
+        from torch.utils.data import Dataset, DataLoader
+
+        embed_model.add_module(
+            "reconstruction", 
+            nn.Sequential(
+                nn.Linear(args.xoutdim, d_model),
+                nn.ReLU(),
+                nn.Linear(d_model, d_model),
+            ).to(DEVICE)
+        )
+
+        logging.info("Pretraining embedding model")
+        qsamples = np.random.choice(range(len(train_dataset.q)), int(len(train_dataset.q) * args.pretrain_budget), replace=False)
+        csamples = np.random.choice(range(len(train_dataset.c)), int(len(train_dataset.c) * args.pretrain_budget), replace=False)
+        pretrain_q = torch.from_numpy(train_dataset.q[qsamples])
+        pretrain_c = torch.from_numpy(train_dataset.c[csamples])
+
+        class PairDatasetPretrain(Dataset):
+            def __init__(self, q, c):
+                self.q = q
+                self.c = c
+
+            def __len__(self):
+                return len(self.q) * len(self.c)
+
+            def __getitem__(self, idx):
+                id1 = idx // len(self.c)
+                id2 = idx % len(self.c)
+                return self.q[id1], self.c[id2]
+
+        pretrain_dataset = PairDatasetPretrain(pretrain_q, pretrain_c)
+        pretrain_loader = DataLoader(pretrain_dataset, batch_size=800, shuffle=True, num_workers=16)
+
+        bestloss = 10
+        bestwts = None
+        es = 0
+        pbar = tqdm(range(1,args.pretrain_epochs+1,1), disable=False)
+        for epoch in pbar:
+            eloss = []
+            for q, c in tqdm(pretrain_loader, leave=False):
+                q, c = q.to(DEVICE), c.to(DEVICE)
+                q = q + batch_get_white_noise(q, args.SNR)
+                qorig, corig = embed_if_image_and_normalize(q, image_embed_model), embed_if_image_and_normalize(c, image_embed_model)
+
+                q, c = embed_model(preembed_model(qorig)), embed_model(preembed_model(corig))
+                q, c = normalize(q, c)
+                loss = F.mse_loss(qorig, q) + F.mse_loss(corig, c)
+                
+                embed_optimizer.zero_grad()
+                if args.preembed != "tokenize": 
+                    preembed_optimizer.zero_grad()
+                loss.backward()
+                embed_optimizer.step()
+                if args.preembed != "tokenize": 
+                    preembed_optimizer.step()
+                scheduler.step()
+
+                pbar.set_postfix_str(f"loss: {loss:.4f}, bestloss: {bestloss:.4f}, es: {es}")
+                eloss.append(loss.item())
+
+            if np.mean(eloss) <= bestloss:
+                bestloss = np.mean(eloss)
+                bestwts = deepcopy(embed_model.state_dict())
+            else:
+                es += 1
+                if es >= 5:
+                    break
+
+        logging.info(f"Pretraining done")
+        embed_model.load_state_dict(bestwts)
+        embed_model.reconstruction = nn.Identity()
+        embed_model.eval()
+        for param in embed_model.parameters():
+            param.requires_grad = False
+
     losslog = []
 
     logging.info("Training\n"+"*"*120+"\n"+"*"*120)
 
     pbar = tqdm(range(1,nepochs+1,1), disable=False)
-    best_val_map, best_val_mrr = 0, 0
+    best_val_MAP, best_val_MRR = 0, 0
 
     enforce_order = args.enforce_order
 
@@ -734,7 +767,6 @@ if __name__ == '__main__':
             q = torch.cat((q, qpos), dim=0).to(DEVICE)
             c = torch.cat((c, cpos), dim=0).to(DEVICE)
             l = torch.cat((l, lpos), dim=0)
-
             if enforce_order:
                 qneg = []   # shuffled
                 cneg = []   # repeats
@@ -765,17 +797,22 @@ if __name__ == '__main__':
             # import ipdb; ipdb.set_trace()
 
             if not DEEPSET:
-                qct = torch.einsum("bmd,bnd->bmn", q, c)
-                
-                if args.use_linear_lammodel:
-                    lambdas = model(torch.cat((q, c), dim=1).flatten(start_dim=1)).unsqueeze(-1)
-                else:
-                    model_inputs = stagger_and_concat(qct, num_stagger=stagger)
-                    if stagger==0: 
-                        model_inputs = model_inputs.squeeze(1)
-                    lambdas = model(model_inputs)
+                if not NOLAMMODEL:
+                    qct = torch.einsum("bmd,bnd->bmn", q, c)
+                    
+                    if args.use_linear_lammodel:
+                        lambdas = model(torch.cat((q, c), dim=1).flatten(start_dim=1)).unsqueeze(-1)
+                    else:
+                        model_inputs = stagger_and_concat(qct, num_stagger=stagger)
+                        if stagger==0: 
+                            model_inputs = model_inputs.squeeze(1)
+                        lambdas = model(model_inputs)
 
-                F_mat = Rm_mat.T @ (2*qct + internal_lamwt * (a_vec @ lambdas.transpose(1,2) @ A_mat).transpose(1,2))
+                    F_mat = Rm_mat.T @ (2*qct + internal_lamwt * (a_vec @ lambdas.transpose(1,2) @ A_mat).transpose(1,2))
+                else:
+                    F_mat = Rm_mat.T @ -(q.unsqueeze(2) - c.unsqueeze(1)).relu().sum(-1)
+                    lambdas = torch.ones((q.shape[0], M, 1), device=DEVICE)
+                
                 if args.single_step_norm == 1:
                     P = F_mat / F_mat.sum(dim=-2, keepdims=True)    # normalizing on the row dimension
                 elif args.single_step_norm == 2:
@@ -783,17 +820,25 @@ if __name__ == '__main__':
                 else:
                     P = gumbel_sinkhorn(F_mat, CFG.tau, CFG.n_sink_iter, noise=False)
 
-                RmPC = torch.einsum("mn,bnn,bnd->bmd", Rm_mat, P, c)
+                # RmPC = torch.einsum("mn,bnn,bnd->bmd", Rm_mat, P, c)  # sanity fail
+                RmPC = Rm_mat @ torch.bmm(P, c)
 
-                lamscore = lamwt * (lambdas.transpose(1,2) @ F.relu(b-A_mat @ Rm_mat @ P @ a_vec)).squeeze()
+                if args.no_lamrelu:
+                    lamscore = lamwt * (lambdas.transpose(1,2) @ (b-A_mat @ Rm_mat @ P @ a_vec)).squeeze()
+                else:
+                    lamscore = lamwt * (lambdas.transpose(1,2) @ F.relu(b-A_mat @ Rm_mat @ P @ a_vec)).squeeze()
                 normscore = torch.norm(q - RmPC, dim=[1,2])
 
                 allscores = torch.stack([lamscore, normscore], dim=1)
                 netscore = 2*scoremodel(-allscores).squeeze()
             else:
-                q, c = aggregator(q), aggregator(c)
-                netscore = 2 * F.sigmoid(-F.relu(q - c).sum(dim=-1))    # normalized to 0-1, 0 for worst, 1 for best (==0 loss)
-                # netscore = -F.relu(q - c).sum(dim=-1)                 # un-normalized scores
+                q, c = aggregator[0](q), aggregator[1](c)
+                if args.deepset_mode == "normalized":   # 2
+                    netscore = 2 * F.sigmoid(-F.relu(q - c).sum(dim=-1))    # normalized to 0-1, 0 for worst, 1 for best (==0 loss)
+                elif args.deepset_mode == "base":       # 1
+                    netscore = -F.relu(q - c).sum(dim=-1)                   # un-normalized scores
+                elif args.deepset_mode == "cosine":     # 3
+                    netscore = 0.5 * (F.cosine_similarity(q, c, dim=-1) + 1)
 
             pos_score = torch.atleast_1d(netscore[torch.where(l==1)])
             neg_score = netscore[torch.where(l==0)]
@@ -806,7 +851,8 @@ if __name__ == '__main__':
 
             optimizer.zero_grad()
             sc_optimizer.zero_grad()
-            embed_optimizer.zero_grad()
+            if not args.pretrain_embedding:
+                embed_optimizer.zero_grad()
             if args.preembed != "tokenize": 
                 preembed_optimizer.zero_grad()
             if DEEPSET:
@@ -814,12 +860,13 @@ if __name__ == '__main__':
             loss.backward()
             optimizer.step()
             sc_optimizer.step()
-            embed_optimizer.step()
+            if not args.pretrain_embedding:
+                embed_optimizer.step()
+                scheduler.step()
             if args.preembed != "tokenize": 
                 preembed_optimizer.step()
             if DEEPSET:
                 aggregator_optimizer.step()
-            scheduler.step()
 
             pbar.set_postfix_str(f"loss: {loss:.4f}")
             wandb_losslog.append(loss.item())
@@ -832,12 +879,12 @@ if __name__ == '__main__':
         if DEEPSET:
             aggregator.eval()
         if not args.use_sing_xfmer:
-            mAP, mRR = compute_metrics(val_dataset, model, scoremodel, embed_model, preembed_model, image_embed_model=image_embed_model, stagger=stagger, verbose=False, aggregator=aggregator)
+            MAP, MRR = compute_metrics(val_dataset, model, scoremodel, embed_model, preembed_model, image_embed_model=image_embed_model, stagger=stagger, verbose=False, aggregator=aggregator)
 
-            if mAP > best_val_map: 
-                best_val_map = mAP
-                val_mrr_at_best = mRR
-                if not args.debug_mode: save_models(model, scoremodel, embed_model, preembed_model, aggregator)
+            if MAP > best_val_MAP: 
+                best_val_MAP = MAP
+                val_MRR_at_best = MRR
+                if not args.debug: save_models(model, scoremodel, embed_model, preembed_model, aggregator)
 
             if enforce_order:
                 odr = compute_odr(val_dataset, model, scoremodel, embed_model, preembed_model, stagger=stagger, verbose=False)
@@ -845,33 +892,33 @@ if __name__ == '__main__':
                 if args.wandb_log:
                     wandb.log({"ODR": odr})
         else:
-            mAP, mRR = 0, 0
-            val_mrr_at_best = 0
-            if not args.debug_mode: save_models(model, scoremodel, embed_model, preembed_model, aggregator)
+            MAP, MRR = 0, 0
+            val_MRR_at_best = 0
+            if not args.debug: save_models(model, scoremodel, embed_model, preembed_model, aggregator)
             
-        logging.info(f"[Epoch {i:2d}|{nepochs}] loss: {np.mean(wandb_losslog):.4f}, val mAP: {mAP:.4f}, val mRR: {mRR:.4f}, best mAP: {best_val_map:.4f}, mRR @ best val mAP: {val_mrr_at_best:.4f}")
+        logging.info(f"[Epoch {i:2d}|{nepochs}] loss: {np.mean(wandb_losslog):.4f}, val MAP: {MAP:.4f}, val MRR: {MRR:.4f}, best MAP: {best_val_MAP:.4f}, MRR @ best val MAP: {val_MRR_at_best:.4f}")
     
         if args.wandb_log:
-            wandb.log({"val MAP": mAP, "val MRR": mRR})
-            wandb.log({"best val MAP": best_val_map, "best val MRR": val_mrr_at_best})
+            wandb.log({"val MAP": MAP, "val MRR": MRR})
+            wandb.log({"best val MAP": best_val_MAP, "best val MRR": val_MRR_at_best})
             wandb_losslog = []
 
-        if not args.debug_mode: save_models(model, scoremodel, embed_model, preembed_model, aggregator, latest=True)
+        if not args.debug: save_models(model, scoremodel, embed_model, preembed_model, aggregator, latest=True)
 
-    model, scoremodel, embed_model, preembed_model, aggregator = load_models(name="best", expt_id=experiment_id, device=DEVICE)
+    model, scoremodel, embed_model, preembed_model, aggregator = load_models(name="best", expt_root=EXPT_ROOT, device=DEVICE, args=args)
     model.eval(), scoremodel.eval(), embed_model.eval(), preembed_model.eval()
     if DEEPSET:
         aggregator.eval()
 
     if args.use_sing_xfmer:
-        mAP, mRR = compute_metrics_sing(test_dataset, model, scoremodel, embed_model, preembed_model, stagger=stagger, verbose=True)
+        MAP, MRR = compute_metrics_sing(test_dataset, model, scoremodel, embed_model, preembed_model, stagger=stagger, verbose=True)
     else:
-        mAP, mRR = compute_metrics(test_dataset, model, scoremodel, embed_model, preembed_model, image_embed_model=image_embed_model, stagger=stagger, verbose=True, aggregator=aggregator)
+        MAP, MRR = compute_metrics(test_dataset, model, scoremodel, embed_model, preembed_model, image_embed_model=image_embed_model, stagger=stagger, verbose=True, aggregator=aggregator)
     
-    logging.info(f"Final test metrics: mAP: {mAP:.4f}, mRR: {mRR:.4f}")
+    logging.info(f"Final test metrics: MAP,MRR: {MAP:.4f},{MRR:.4f}")
     if args.wandb_log: 
-        wandb.log({"Test MAP": mAP, "Test MRR": mRR})
-    print(f"Final test metrics: mAP: {mAP:.4f}, mRR: {mRR:.4f}")
+        wandb.log({"Test MAP": MAP, "Test MRR": MRR})
+    print(f"Final test metrics: MAP,MRR: {MAP:.4f},{MRR:.4f}")
 
-    if not args.debug_mode: save_models(model, scoremodel, embed_model, preembed_model, aggregator, final=True)
+    if not args.debug: save_models(model, scoremodel, embed_model, preembed_model, aggregator, final=True)
     logging.info("*"*120+"\n"+"*"*120)

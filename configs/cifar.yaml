@@ -1,0 +1,8 @@
+batch_size: 800
+delta: 0.7
+num_q: 800
+train_with_orig: True
+
+xoutdim: 32
+xlr: 5e-5
+xff: 256

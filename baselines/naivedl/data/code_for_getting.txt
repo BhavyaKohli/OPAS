@@ -1,0 +1,25 @@
+(originally in neuts/training_exploration.ipynb)
+
+import h5py
+import os
+import numpy as np
+
+data_root = "../../final_data/"
+dataset = "audio"
+dataset_folder = os.path.join(data_root, dataset)
+train_filepath = os.path.join(dataset_folder, "dataset_train.hdf5")
+
+np.random.seed(69)
+data = h5py.File(train_filepath, "r")
+qlocs = np.random.choice(range(len(data['Q'])), size=1000, replace=False)
+queries = data['Q'][:][qlocs]
+clocs = np.random.choice(range(len(data['C'])), size=1000, replace=False)
+corpuses = data['C'][:][clocs]
+
+import torch
+
+queries_flat = torch.from_numpy(queries)#.flatten(start_dim=1)
+corpuses_flat = torch.from_numpy(corpuses)#.flatten(start_dim=1)
+
+torch.save(queries_flat, "../naivedl/data/queries.pt")
+torch.save(corpuses_flat, "../naivedl/data/corpuses.pt")

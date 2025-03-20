@@ -92,39 +92,36 @@ def feature_generation_custom(path='./data/opasaudio/', ts_number=1000000):
 
     queries = torch.load(os.path.join(path,'queries.pt')).float().numpy()[:, ::100]
     corpuses = torch.load(os.path.join(path,'corpuses.pt')).float().numpy()[:, ::100]
-    ts_all = torch.cat((queries, corpuses), dim=-1)
-
-    queries = norm_data(queries)
-    corpuses = norm_data(corpuses)
+    ts_all = np.concatenate((queries, corpuses), axis=-1)
+    # 240 || 800
+    import ipdb; ipdb.set_trace()
+    ts_all = norm_data(ts_all)
+    ts_all = ts_all[:ts_number]
+    print(len(ts_all))
+    print(ts_all[0])
+    print(ts_all[1])
+    print(len(ts_all[0]))
+    print(ts_all_labels)
+    import ipdb; ipdb.set_trace()
 
     preprocessor = PreprocesserTS(delta=[0.001], dim_ranges=[x_range])
 
-    queries_grid = [
-        [
-            [preprocessor.get_grid_index(tuple=i)[1]] 
-            for i in ts
-        ] 
-        for ts in tqdm(queries, desc="Query grid")
-    ]
-    corpus_grid = [
-        [
-            [preprocessor.get_grid_index(tuple=i)[1]]
-            for i in ts
-        ] 
-        for ts in tqdm(corpuses, desc="Corpus grid")
-    ]
+    ts_all_grid = [
+        [[preprocessor.get_grid_index(tuple=i)[1]] for i in ts] for ts in ts_all]
+    print(ts_all_grid[0])
 
-    qlength = len(queries[0])
-    clength = len(corpuses[0])
-
-    cPickle.dump((queries, [], qlength), open(
-        './features/{}_all_qts_value'.format(fname), 'wb'))
-    cPickle.dump((corpuses, [], clength), open(
-        './features/{}_all_cts_value'.format(fname), 'wb'))
-    cPickle.dump((queries_grid, [], qlength), open(
-        './features/{}_all_qts_grid'.format(fname), 'wb'))
-    cPickle.dump((corpus_grid, [], clength), open(
-        './features/{}_all_cts_grid'.format(fname), 'wb'))
+    length = len(ts_all[0])
+    ts_index = {}
+    for i, ts in enumerate(ts_all):
+        ts_index[i] = ts
+    cPickle.dump(ts_index, open(
+        './features/{}_all_ts_index'.format(fname), 'wb'))
+    cPickle.dump((ts_all, [], length), open(
+        './features/{}_all_ts_value'.format(fname), 'wb'))
+    cPickle.dump((ts_all_grid, [], length), open(
+        './features/{}_all_ts_grid'.format(fname), 'wb'))
+    cPickle.dump((ts_all_labels, [], length), open(
+        './features/{}_all_ts_label'.format(fname), 'wb'))
 
     return './features/{}_all_ts_value'.format(fname), fname
 

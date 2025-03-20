@@ -1,6 +1,8 @@
-import numpy as np
-from numpy.linalg import norm
 import torch
+import numpy as np
+
+from time import perf_counter
+from numpy.linalg import norm
 
 
 def normalize(*args):
@@ -37,23 +39,47 @@ def get_opas_constants(M, N, device):
     return A_mat, a_vec, Rm_mat
 
 
+def seed_everything(seed):
+    import random, os
+    import numpy as np
+    
+    random.seed(seed)
+    os.environ['PYTHONHASHSEED'] = str(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed(seed)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
+
+
+class catchtime:
+    def __enter__(self):
+        self.start = perf_counter()
+        return self
+
+    def __exit__(self, type, value, traceback):
+        self.time = perf_counter() - self.start
+        self.readout = f'Time: {self.time:.3f} seconds'
+        print(self.readout)
+
+
 # https://github.com/perrying/gumbel-sinkhorn/blob/master/utils/gumbel_sinkhorn_ops.py
 
-def sinkhorn_norm(alpha: torch.Tensor, n_iter: int = 20) -> (torch.Tensor,):
+def sinkhorn_norm(alpha: torch.Tensor, n_iter: int = 20):
     for _ in range(n_iter):
         alpha = alpha / alpha.sum(-1, keepdim=True)
         alpha = alpha / alpha.sum(-2, keepdim=True)
     return alpha
 
 
-def log_sinkhorn_norm(log_alpha: torch.Tensor, n_iter: int =20) -> (torch.Tensor,):
+def log_sinkhorn_norm(log_alpha: torch.Tensor, n_iter: int =20):
     for _ in range(n_iter):
         log_alpha = log_alpha - torch.logsumexp(log_alpha, -1, keepdim=True)
         log_alpha = log_alpha - torch.logsumexp(log_alpha, -2, keepdim=True)
     return log_alpha.exp()
 
 
-def gumbel_sinkhorn(log_alpha: torch.Tensor, tau: float = 1.0, n_iter: int = 20, noise: bool = True) -> (torch.Tensor,):
+def gumbel_sinkhorn(log_alpha: torch.Tensor, tau: float = 1.0, n_iter: int = 20, noise: bool = True):
     if noise:
         uniform_noise = torch.rand_like(log_alpha)
         gumbel_noise = -torch.log(-torch.log(uniform_noise+1e-20)+1e-20)
@@ -70,7 +96,7 @@ def gen_assignment(cost_matrix):
     np_assignment_matrix = coo_matrix((np.ones_like(row), (row, col))).toarray()
     return np_assignment_matrix
 
-def gumbel_matching(log_alpha : torch.Tensor, noise: bool = True) -> (torch.Tensor,):
+def gumbel_matching(log_alpha : torch.Tensor, noise: bool = True):
     if noise:
         uniform_noise = torch.rand_like(log_alpha)
         gumbel_noise = -torch.log(-torch.log(uniform_noise+1e-20)+1e-20)

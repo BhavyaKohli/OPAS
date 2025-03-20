@@ -1,0 +1,27 @@
+final_data/*
+colab_notebooks/
+models/*
+models_/
+models_old/
+hashing/
+xhashing/
+baselines/tensors/*.pt
+
+__pycache__/*
+__pycache__/
+
+!README.md
+
+nb_*
+tmp/
+
+*.pkl
+
+*gt/
+*.log
+*.hdf5
+
+# links
+*gt
+audio_processed
+speech_processed

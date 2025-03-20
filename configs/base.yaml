@@ -1,0 +1,62 @@
+# base
+dataset: ???
+seed: 69
+reproducible: 1
+debug: False
+wandb_log: False
+
+# data
+num_q: 300
+print_dataset: True
+train_with_orig: False
+neg_expl: 800
+
+# hparams
+b: 1.0
+b1: 0.0
+delta: 0.7
+stagger: 0
+lamwt: 1e-2
+gapwt: 0.0
+SNR: 1
+noise: 0
+preembed: "tokenize"
+
+# base lr, epochs
+lr: 5e-4
+nepochs: 30
+device: ???
+batch_size: 200
+
+# transformer
+xnhead: 4
+xnumlayers: 2
+xoutdim: 128
+xlr: 1e-5
+xwarmupepochs: 20
+
+# experiments, most to be overriden from argparse
+use_sing_xfmer: False
+no_tokenize: False
+enforce_order: False
+deepset: False
+deepset_mode: "base"
+add_attention: False
+lfcc: False
+
+# sinkhorn params
+n_sink_iter: 20
+single_step_norm: -1
+
+# post-review
+internal_lamwt: 1
+use_linear_lammodel: False
+
+# new experiments
+no_lammodel: False
+no_lamrelu: False
+pretrain_embedding: False
+pretrain_budget: 0.25
+pretrain_epochs: 30
+skip_embed: False
+skip_type: "lin"
