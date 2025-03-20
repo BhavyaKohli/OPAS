@@ -40,7 +40,7 @@ use_sing_xfmer: False
 no_tokenize: False
 enforce_order: False
 deepset: False
-deepset_mode: 1
+deepset_mode: "base"
 add_attention: False
 lfcc: False
 
