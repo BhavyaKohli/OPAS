@@ -4,6 +4,8 @@ from time import perf_counter
 from opas.models.sortlrl import SortLRL
 from opas.models.model_utils import load_models, get_image_embed_model
 
+from opas.data import PairDatasetTrainHPlane, PairDatasetTestHPlane
+
 
 def batch_fwd_q(image_embed_model, preembed_model, embed_model, q):
     q = embed_if_image_and_normalize(q, image_embed_model)
@@ -30,20 +32,20 @@ def validation(loader, qhasher, chasher, criterion, batch_fwd_q):
 
 
 @torch.no_grad()
-def validation_map(dataset, qhasher, chasher, batch_fwd_q):
+def validation_map(dataset, qhasher, chasher):
     device = next(qhasher.parameters()).device
-    C = chasher(torch.from_numpy(dataset.c).to(device))
+    C = chasher(dataset.c.to(device))
+    Q = qhasher(dataset.q.to(device))
 
-    Q, true_labels = [], []
+    true_labels = []
     loader = dataset.get_dataloader(batch_size=150, shuffle=False)
-    for (q, l) in tqdm(loader, desc="Validation...", leave=False):
-        q = qhasher(batch_fwd_q(q.to(device)))
-        Q.append(q)  
+    for (q, l, gtl) in tqdm(loader, desc="Validation...", leave=False):
         true_labels.append(l.to('cpu'))
 
-    Q = torch.vstack(Q)
     true_labels = torch.vstack(true_labels)
     netscores = F.cosine_similarity(Q.unsqueeze(1), C.unsqueeze(0), dim=-1).to('cpu')
+    import ipdb; ipdb.set_trace()
+    netscores = dataset.qcscores
 
     ranking = netscores.argsort(dim=1, descending=True)
     ranked_output = torch.gather(true_labels, dim=1, index=ranking)
@@ -58,13 +60,36 @@ def validation_map(dataset, qhasher, chasher, batch_fwd_q):
     return MAP, MRR
 
 
+class SortNoLRL(nn.Module):
+    def __init__(self, indim, outdim):
+        super().__init__()
+        self.alpha = nn.Parameter(torch.randn(1, indim))
+        self.outdim = outdim
+
+    def forward(self, x):
+        # x: (batch_size, seq_len, indim)
+        # output: (batch_size, outdim)
+        proj = (x @ self.alpha.T).squeeze(-1)
+        proj = torch.sort(proj, dim=-1)
+        return F.pad(proj.values, (0, self.outdim - proj.values.shape[-1]), value=0)
+    
+
+class SortL(nn.Module):
+    def __init__(self, indim, seq_len, outdim):
+        super().__init__()
+        self.alpha = nn.Parameter(torch.randn(1, indim))
+        self.lin = nn.Linear(seq_len, outdim)
+
+    def forward(self, x):
+        # x: (batch_size, seq_len, indim)
+        # output: (batch_size, outdim)
+        proj = (x @ self.alpha.T).squeeze(-1)
+        proj = torch.sort(proj, dim=-1)
+        return self.lin(proj.values)
+
 
 if __name__ == "__main__":
     cli_args = OmegaConf.from_cli()
-    if any([cli_args.expt_id is None, cli_args.device is None, cli_args.hash_latent is None]):
-        print(cli_args)
-        raise ValueError("Please provide a valid experiment ID (expt_id), device id (device), latent dimension for SortLRL (hash_latent)")
-
     base_conf = OmegaConf.load("configs/hash_base.yaml")
 
     experiment_id = cli_args.expt_id
@@ -119,53 +144,72 @@ if __name__ == "__main__":
     VAL_FILE = f"{DATA_ROOT}/dataset_val.hdf5"
     TEST_FILE = f"{DATA_ROOT}/dataset_test.hdf5"
 
-    image_embed_model, TRAIN_FILE, VAL_FILE, TEST_FILE = get_image_embed_model(dataset, TRAIN_FILE, VAL_FILE, TEST_FILE)
+    image_embed_model, TRAIN_FILE, VAL_FILE, TEST_FILE = get_image_embed_model(dataset, [TRAIN_FILE, VAL_FILE, TEST_FILE], device=DEVICE)
     
-    neg_expl = getattr(args, "neg_expl", 800)
-    train_dataset = PairDatasetTrain(TRAIN_FILE, num_q=args.num_q, negative_exploration=neg_expl)
-    val_dataset = PairDatasetTest(VAL_FILE)
-    test_dataset = PairDatasetTest(TEST_FILE)
+    # neg_expl = getattr(args, "neg_expl", 800)
+    # train_dataset = PairDatasetTrain(TRAIN_FILE, num_q=args.num_q, negative_exploration=neg_expl)
+    # val_dataset = PairDatasetTest(VAL_FILE)
+    # test_dataset = PairDatasetTest(TEST_FILE)
+
+    hasher = [nn.Identity(), nn.Identity()]
+    models = [model, scoremodel, embed_model, preembed_model, hasher]
+
 
     st = perf_counter()
-    with torch.no_grad():
-        train_dataset.c = embed_full_corpus(train_dataset, embed_model, preembed_model, image_embed_model=image_embed_model, aggregator=aggregator).cpu().numpy()
-        val_dataset.c = embed_full_corpus(val_dataset, embed_model, preembed_model, image_embed_model=image_embed_model, aggregator=aggregator).cpu().numpy()
-        test_dataset.c = embed_full_corpus(test_dataset, embed_model, preembed_model, image_embed_model=image_embed_model, aggregator=aggregator).cpu().numpy()
-    print(f"Pre-embedded corpus in {perf_counter() - st:.3f}s")
+    train_dataset = PairDatasetTrainHPlane(TRAIN_FILE, models=models, args=args, num_q=args.num_q, negative_exploration=args.neg_expl)
+    val_dataset = PairDatasetTestHPlane(VAL_FILE, models=models, args=args)
+    # test_dataset = PairDatasetTestHPlane(TEST_FILE, models=models, args=args)
+    print(f"Datasets loaded in {perf_counter() - st:.3f}s")
 
     trainloader = train_dataset.get_dataloader(batch_size=args.batch_size, shuffle=True)
-    valloader = val_dataset.get_dataloader(batch_size=args.batch_size, shuffle=False)
 
-    positive_samples = 10
+    positive_samples = getattr(args, "pos_samps", 10)
     M = train_dataset.q[0].shape[0]
     N = train_dataset.c[0].shape[0]
 
     hasher_type = getattr(args, "hasher_type", "SortLRL")
-    if hasher_type == "SortLRL":
+    if hasher_type == "SortLRL":        # outdim, latent used for inner LRL model
         qhasher = SortLRL(indim=args.xoutdim, seq_len=M, latent=args.hash_latent, outdim=getattr(args, "hash_outdim", max(M,N))).to(DEVICE)
         chasher = SortLRL(indim=args.xoutdim, seq_len=N, latent=args.hash_latent, outdim=getattr(args, "hash_outdim", max(M,N))).to(DEVICE)
-        hasher = nn.ModuleList([qhasher, chasher])
-    elif hasher_type == "DeepSet":
+
+    elif hasher_type == "SortNoLRL":    # outdim used for zero-padding
+        qhasher = SortNoLRL(indim=args.xoutdim, outdim=getattr(args, "hash_outdim", max(M,N))).to(DEVICE)
+        chasher = SortNoLRL(indim=args.xoutdim, outdim=getattr(args, "hash_outdim", max(M,N))).to(DEVICE)
+    
+    elif hasher_type == "SortL":        # outdim used for single linear layer
+        qhasher = SortL(indim=args.xoutdim, seq_len=M, outdim=getattr(args, "hash_outdim", max(M,N))).to(DEVICE)
+        chasher = SortL(indim=args.xoutdim, seq_len=N, outdim=getattr(args, "hash_outdim", max(M,N))).to(DEVICE)    
+
+    elif hasher_type == "DeepSet":      # single model can be used for both q and c (agnostic to seq_len)
         qhasher = DeepSetModel(indim=args.xoutdim, latent=args.hash_latent, outdim=getattr(args, "hash_outdim", max(M,N))).to(DEVICE)
         if getattr(args, "share_hasher", False):
             chasher = DeepSetModel(indim=args.xoutdim, latent=args.hash_latent, outdim=getattr(args, "hash_outdim", max(M,N))).to(DEVICE)
         else:
             chasher = qhasher
-        hasher = nn.ModuleList([qhasher, chasher])
+    hasher = nn.ModuleList([qhasher, chasher])  # grouped so we can use a single optimizer
 
     optimizer = torch.optim.Adam(hasher.parameters(), lr=args.lr, weight_decay=1e-4)
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode="max", factor=0.9, patience=5)
     # criterion = lambda q, c, l: F.cosine_embedding_loss(q, c, l, margin=args.hash_margin)
     # criterion = lambda q, c, l: F.cross_entropy(0.5 * (F.cosine_similarity(q, c) + 1), l)
-    criterion = lambda q, c, l: nn.BCELoss()(0.5 * (F.cosine_similarity(q, c) + 1), l)
-        
-    batch_fwd_q = partial(batch_fwd_q, image_embed_model, preembed_model, embed_model)
+    # criterion = lambda q, c, l: nn.BCELoss()(0.5 * (F.cosine_similarity(q, c) + 1), l)
+    
+    def LOSS_ON_SILVER(q, c, l, loss='bce'):
+        cs = F.cosine_similarity(q, c).sigmoid() 
+        # cs is now in [0,1], original scores "l" are in [0,1]
+        if loss == "bce":
+            return F.binary_cross_entropy(cs, l)
+        if loss == "mse":
+            return F.mse_loss(cs, l)
 
+    criterion = partial(LOSS_ON_SILVER, loss=getattr(args, "loss_type", "bce"))
+        
     pbar = tqdm(range(1,args.nepochs+1,1), disable=False)
     best_val_map = 0
     es = 0
     for epoch in pbar:
         inner_pbar = tqdm(trainloader, disable=False, leave=False)
+        val_map, val_mrr = validation_map(val_dataset, qhasher, chasher)
 
         hasher.train()
         losses = []
@@ -180,8 +224,8 @@ if __name__ == "__main__":
             # c: (batch_size, N, indim)
             # l: (batch_size)
 
-            q = q + batch_get_white_noise(q, args.SNR)
-            q = batch_fwd_q(q)
+            # q = q + batch_get_white_noise(q, args.SNR)
+            # q = batch_fwd_q(q)
             
             q, c = qhasher(q), chasher(c)
             # q: (batch_size, outdim)
@@ -197,7 +241,7 @@ if __name__ == "__main__":
             inner_pbar.set_postfix_str(f"Loss: {np.mean(losses[-50:]):.4f}")
 
         hasher.eval()
-        val_map, val_mrr = validation_map(val_dataset, qhasher, chasher, batch_fwd_q)
+        val_map, val_mrr = validation_map(val_dataset, qhasher, chasher)
         # scheduler.step(val_map)
 
         if val_map >= best_val_map + 1e-8:
@@ -211,7 +255,7 @@ if __name__ == "__main__":
             if es > 50:
                 print(f"Early stopping at epoch {epoch}")
                 break
-        logstr = f"Epoch: {epoch}, Loss: {np.mean(losses):.4f}, Val MAP: {val_map:.4f}, Val MRR: {val_mrr:.4f}, Best Val MAP: {best_val_map:.4f}"
+        logstr = f"Loss: {np.mean(losses):.4f}, Val MAP: {val_map:.4f}, Val MRR: {val_mrr:.4f}, Best Val MAP: {best_val_map:.4f}"
         pbar.set_postfix_str(f"ES: {es:2d}, {logstr}")
 
         if not DEBUG:
