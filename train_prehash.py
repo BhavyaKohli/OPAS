@@ -38,9 +38,15 @@ def validation_map(dataset, qhasher, chasher):
     Q = qhasher(dataset.q.to(device))
     true_labels = dataset.lonehot.cpu()
 
-    netscores = F.cosine_similarity(Q.unsqueeze(1), C.unsqueeze(0), dim=-1).sigmoid().to('cpu')
+    netscores = ((Q @ C.T) / (torch.norm(Q, dim=-1, keepdim=True) * torch.norm(C, dim=-1, keepdim=True).T)).sigmoid().cpu()
+    # netscores = []
+    # batch_size = 150
+    # import ipdb; ipdb.set_trace()
+    # for i in range(0, len(Q), batch_size):
+    #     netscores.append(F.cosine_similarity(Q.unsqueeze(1), C.unsqueeze(0), dim=-1).sigmoid().to('cpu'))
     # import ipdb; ipdb.set_trace()
     # netscores = dataset.qcscores
+    # netscores = torch.vstack(netscores)
 
     ranking = netscores.argsort(dim=1, descending=True)
     ranked_output = torch.gather(true_labels, dim=1, index=ranking)
@@ -127,6 +133,7 @@ if __name__ == "__main__":
     hasher_expt_root = f"hashing/{experiment_id}_{max(ls)+1}"
     logger.remove(0)
     if not DEBUG:
+        print("Logging to", hasher_expt_root)
         os.makedirs(hasher_expt_root, exist_ok=True)
         logger.add(f"{hasher_expt_root}/training.log", level="INFO", format="{time:D-MM-YYYY HH:mm:ss} | {level} | {message}")
 
@@ -211,8 +218,8 @@ if __name__ == "__main__":
             chasher = qhasher
     hasher = nn.ModuleList([qhasher, chasher])  # grouped so we can use a single optimizer
 
-    optimizer = torch.optim.AdamW(hasher.parameters(), lr=args.lr)
-    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode="max", factor=0.95, patience=5, min_lr=1e-5)
+    optimizer = torch.optim.AdamW(hasher.parameters(), lr=args.lr, amsgrad=True)
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode="max", factor=0.95, patience=5, min_lr=1e-6)
     # criterion = lambda q, c, l: F.cosine_embedding_loss(q, c, l, margin=args.hash_margin)
     # criterion = lambda q, c, l: F.cross_entropy(0.5 * (F.cosine_similarity(q, c) + 1), l)
     # criterion = lambda q, c, l: nn.BCELoss()(0.5 * (F.cosine_similarity(q, c) + 1), l)
@@ -259,7 +266,7 @@ if __name__ == "__main__":
                     neg = torch.where(l[i] == 0)[0]
                     neg = neg[torch.randperm(len(neg))[:total_exploration - len(pos)]]
                     idxs.append(torch.cat((pos, neg)))
-                idxs = torch.stack(idxs)
+                idxs = torch.stack(idxs).to(DEVICE)
             
                 scores = torch.gather(scores, 1, idxs)
                 gtl = torch.gather(gtl, 1, idxs)
@@ -273,6 +280,10 @@ if __name__ == "__main__":
             
             losses.append(loss.item())
             inner_pbar.set_postfix_str(f"Loss: {np.mean(losses[-50:]):.4f}")
+
+            del scores
+
+        torch.cuda.empty_cache()
 
         hasher.eval()
         val_map, val_mrr = validation_map(val_dataset, qhasher, chasher)
@@ -290,7 +301,7 @@ if __name__ == "__main__":
             bestwts = hasher.state_dict()
         else:
             es += 1
-            if es > 50:
+            if es > 100:
                 print(f"Early stopping at epoch {epoch}")
                 break
         logstr = f"Loss: {np.mean(losses):.4f}, Val MAP: {val_map:.4f}, Val MRR: {val_mrr:.4f}, Best Val MAP: {best_val_map:.4f}"
