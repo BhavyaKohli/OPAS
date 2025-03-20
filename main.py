@@ -410,6 +410,19 @@ def load_models(name="best", expt_id=None, device="cpu"):
     return model, scoremodel, embed_model, preembed_model, aggregator
 
 
+class LRLModel(nn.Module):
+    def __init__(self, indim, seq_len, latent, outdim):
+        super().__init__()
+        self.lrl = nn.Sequential(
+            nn.Linear(indim * seq_len, latent),
+            nn.ReLU(),
+            nn.Linear(latent, outdim)
+        )
+    
+    def forward(self, x):
+        return self.lrl(x.flatten(start_dim=1))
+
+
 if __name__ == '__main__':
     cli_conf = OmegaConf.from_cli()
     dataset = cli_conf.dataset
@@ -704,10 +717,15 @@ if __name__ == '__main__':
 
     if DEEPSET:
         use_sort_lrl = getattr(args, "use_sort_lrl", False)
+        use_lrl_embed = getattr(args, "use_lrl_embed", False)
         if use_sort_lrl:
             qsort = SortLRL(args.xoutdim, seq_len=M, latent=args.xff, outdim=args.xoutdim).to(DEVICE)
             csort = SortLRL(args.xoutdim, seq_len=N, latent=args.xff, outdim=args.xoutdim).to(DEVICE)
             aggregator = nn.ModuleList([qsort, csort])
+        elif use_lrl_embed:
+            qembed = LRLModel(indim=args.xoutdim, seq_len=M, latent=args.xff, outdim=args.xoutdim).to(DEVICE)
+            cembed = LRLModel(indim=args.xoutdim, seq_len=N, latent=args.xff, outdim=args.xoutdim).to(DEVICE)
+            aggregator = nn.ModuleList([qembed, cembed])
         else:
             deepset = DeepSetModel(indim=args.xoutdim, latent=args.xoutdim//2, outdim=args.xoutdim//2).to(DEVICE)
             aggregator = nn.ModuleList([deepset, deepset])
@@ -900,10 +918,12 @@ if __name__ == '__main__':
                 netscore = 2*scoremodel(-allscores).squeeze()
             else:
                 q, c = aggregator[0](q), aggregator[1](c)
-                if args.deepset_mode == 2:
+                if args.deepset_mode == "normalized":   # 2
                     netscore = 2 * F.sigmoid(-F.relu(q - c).sum(dim=-1))    # normalized to 0-1, 0 for worst, 1 for best (==0 loss)
-                elif args.deepset_mode == 1:
+                elif args.deepset_mode == "base":       # 1
                     netscore = -F.relu(q - c).sum(dim=-1)                   # un-normalized scores
+                elif args.deepset_mode == "cosine":     # 3
+                    netscore = 0.5 * (F.cosine_similarity(q, c, dim=-1) + 1)
 
             pos_score = torch.atleast_1d(netscore[torch.where(l==1)])
             neg_score = netscore[torch.where(l==0)]
