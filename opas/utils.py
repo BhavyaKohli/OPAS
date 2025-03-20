@@ -65,21 +65,21 @@ class catchtime:
 
 # https://github.com/perrying/gumbel-sinkhorn/blob/master/utils/gumbel_sinkhorn_ops.py
 
-def sinkhorn_norm(alpha: torch.Tensor, n_iter: int = 20) -> (torch.Tensor,):
+def sinkhorn_norm(alpha: torch.Tensor, n_iter: int = 20):
     for _ in range(n_iter):
         alpha = alpha / alpha.sum(-1, keepdim=True)
         alpha = alpha / alpha.sum(-2, keepdim=True)
     return alpha
 
 
-def log_sinkhorn_norm(log_alpha: torch.Tensor, n_iter: int =20) -> (torch.Tensor,):
+def log_sinkhorn_norm(log_alpha: torch.Tensor, n_iter: int =20):
     for _ in range(n_iter):
         log_alpha = log_alpha - torch.logsumexp(log_alpha, -1, keepdim=True)
         log_alpha = log_alpha - torch.logsumexp(log_alpha, -2, keepdim=True)
     return log_alpha.exp()
 
 
-def gumbel_sinkhorn(log_alpha: torch.Tensor, tau: float = 1.0, n_iter: int = 20, noise: bool = True) -> (torch.Tensor,):
+def gumbel_sinkhorn(log_alpha: torch.Tensor, tau: float = 1.0, n_iter: int = 20, noise: bool = True):
     if noise:
         uniform_noise = torch.rand_like(log_alpha)
         gumbel_noise = -torch.log(-torch.log(uniform_noise+1e-20)+1e-20)
@@ -96,7 +96,7 @@ def gen_assignment(cost_matrix):
     np_assignment_matrix = coo_matrix((np.ones_like(row), (row, col))).toarray()
     return np_assignment_matrix
 
-def gumbel_matching(log_alpha : torch.Tensor, noise: bool = True) -> (torch.Tensor,):
+def gumbel_matching(log_alpha : torch.Tensor, noise: bool = True):
     if noise:
         uniform_noise = torch.rand_like(log_alpha)
         gumbel_noise = -torch.log(-torch.log(uniform_noise+1e-20)+1e-20)
