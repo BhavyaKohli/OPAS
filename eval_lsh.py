@@ -1,6 +1,7 @@
 from train_prehash import *
 from train_hyperplanes import *
 from sklearn.metrics import average_precision_score
+from opas.data import get_all_pair_scores
 
 import warnings
 warnings.filterwarnings("ignore", category=UserWarning)

@@ -56,6 +56,8 @@ def compute_metrics(dataset, model, scoremodel, embed_model, preembed_model, ima
             # q is bd, C is Nd, we want bN scores
             # b1d - 1Nd = bNd --> sum across last dim to get bN scores
             netscore = 2 * F.sigmoid(-F.relu(q.unsqueeze(1) - C.unsqueeze(0)).sum(dim=-1))    # bN
+            if args.deepset_mode == "cosine":     # 3
+                netscore = 0.5 * (F.cosine_similarity(q.unsqueeze(1), C.unsqueeze(0), dim=-1) + 1)
 
         netscores.append(netscore.to('cpu'))
         true_labels.append(l.to('cpu'))
@@ -106,7 +108,7 @@ if __name__ == "__main__":
     print(f"normscore weight: {nwt:.4f}, lamscore weight: {lamwt:.4f}")
     
     DATA_ROOT = f"final_data/{dataset}"
-    TEST_FILE = f"{DATA_ROOT}/dataset_test.hdf5"
+    TEST_FILE = f"{DATA_ROOT}/dataset_train.hdf5"
 
     image_embed_model, TEST_FILE = get_image_embed_model(dataset, [TEST_FILE], device=DEVICE)
 

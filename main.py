@@ -13,7 +13,7 @@ from datetime import datetime
 from omegaconf import OmegaConf
 
 from opas.tstok.tsutils import TOKENIZER, tokenize, batch_get_white_noise
-from opas.utils import AttributeDict, gumbel_sinkhorn, normalize, get_opas_constants, seed_everything
+from opas.utils import AttributeDict, gumbel_sinkhorn, normalize, get_opas_constants, seed_everything, embed_full_corpus, embed_if_image_and_normalize, stagger_and_concat
 from opas.data import PairDatasetTrain, PairDatasetTest
 
 from opas.models.main import LamModel, ScoreModel, PositionalEncoding, TransformInput
@@ -33,18 +33,6 @@ import torchaudio.transforms as T
 tqdm = partial(tqdm, ncols=150)
 
 
-def stagger_and_concat(model_inputs, num_stagger=1):
-    # input of shape bmn OR bNmn
-    if len(model_inputs.shape) == 3:
-        model_inputs = model_inputs.unsqueeze(1)
-
-    model_inputs_staggered = [model_inputs]
-    for i in range(1,num_stagger+1,1):
-        model_inputs_staggered.append(torch.dstack((model_inputs[:,:,i:,:], torch.zeros_like(model_inputs)[:,:,:i,:])))
-    if num_stagger==0 : return torch.stack(model_inputs_staggered, dim=2)
-    return torch.stack(model_inputs_staggered, dim=2).squeeze() 
-
-
 class Attention_Layer(nn.Module):
     def __init__(self, n_feats: int) -> None:
         super().__init__()
@@ -57,42 +45,6 @@ class Attention_Layer(nn.Module):
         w = self.w(X)
         output = F.softmax(torch.mul(X, w), dim=1)
         return output
-
-
-@torch.no_grad()
-def embed_image(model, x):
-    x = x.to(next(model.parameters()).device)
-    out = model.encoder(x) 
-    out = out.flatten(start_dim=-3)
-    return out
-
-
-@torch.no_grad()
-def embed_if_image_and_normalize(c, image_embed_model=None):
-    if len(c.shape) != 3:   
-        # b x n x c x h x w instead of b x n x d
-        if image_embed_model is None:
-            raise ValueError("Image embed model not provided")
-        c = torch.stack([embed_image(image_embed_model, c_) for c_ in c])
-    return normalize(c)
-
-
-@torch.no_grad()
-def embed_full_corpus(dataset, embed_model, preembed_model, image_embed_model=None, inner_batch_size=800, aggregator=None, verbose=False):
-    C = dataset.c
-    if not isinstance(C, torch.Tensor):
-        C = torch.from_numpy(C).float()    
-    Cembed = []
-    for batch in tqdm(range(0, len(C), inner_batch_size), disable=not verbose, leave=False, desc="Embedding..."):
-        c = C[batch:batch+inner_batch_size].to(next(embed_model.parameters()).device)
-        c = embed_if_image_and_normalize(c, image_embed_model)
-        c = embed_model(preembed_model(c))
-        c = normalize(c)
-        if aggregator is not None:
-            c = aggregator[1](c)
-        Cembed.append(c)
-    C = torch.vstack(Cembed)
-    return C
 
 
 @torch.no_grad()
@@ -840,7 +792,7 @@ if __name__ == '__main__':
                 elif args.deepset_mode == "cosine":     # 3
                     netscore = 0.5 * (F.cosine_similarity(q, c, dim=-1) + 1)
 
-            pos_score = torch.atleast_1d(netscore[torch.where(l==1)])
+            pos_score = netscore[torch.where(l==1)]
             neg_score = netscore[torch.where(l==0)]
             
             neg_minus_pos = (neg_score.unsqueeze(0) - pos_score.unsqueeze(1)).reshape(-1)   # dim(pos_score) * dim(neg_score)
