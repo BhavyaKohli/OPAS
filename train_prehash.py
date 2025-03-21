@@ -205,6 +205,8 @@ if __name__ == "__main__":
 
     hasher_type = getattr(args, "hasher_type", "SortLRL")
     hash_outdim = getattr(args, "hash_outdim", max(M,N))
+    try: hash_outdim = args.outdim
+    except: pass
     hash_latent = getattr(args, "hash_latent", args.xff)
     args.hasher_type, args.hash_outdim, args.hash_latent = hasher_type, hash_outdim, hash_latent
     if hasher_type == "SortLRL":        # outdim, latent used for inner LRL model
@@ -230,7 +232,7 @@ if __name__ == "__main__":
     use_amsgrad = getattr(args, "amsgrad", False)
     args.use_amsgrad = use_amsgrad
     optimizer = torch.optim.AdamW(hasher.parameters(), lr=args.lr, amsgrad=use_amsgrad)
-    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode="max", factor=0.95, patience=5, min_lr=5e-5)
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode="max", factor=0.95 if args.scheduler else 1, patience=20, min_lr=5e-5)
     # criterion = lambda q, c, l: F.cosine_embedding_loss(q, c, l, margin=args.hash_margin)
     # criterion = lambda q, c, l: F.cross_entropy(0.5 * (F.cosine_similarity(q, c) + 1), l)
     # criterion = lambda q, c, l: nn.BCELoss()(0.5 * (F.cosine_similarity(q, c) + 1), l)
