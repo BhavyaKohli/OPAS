@@ -1,3 +1,5 @@
+import wandb
+
 from main import *
 from loguru import logger
 from time import perf_counter
@@ -127,12 +129,16 @@ if __name__ == "__main__":
     # overrides
     args = OmegaConf.create(vars(args))
     args = argparse.Namespace(**OmegaConf.merge(args, base_conf, cli_args))
-    DEBUG = getattr(args, "debug", False)
+    DEBUG = args.debug
 
-    ls = [int(l.split('_')[-1]) for l in os.listdir("hashing") if experiment_id in l and os.path.isdir(f"hashing/{l}")]
-    hasher_expt_root = f"hashing/{experiment_id}_{max(ls)+1}"
     logger.remove(0)
     if not DEBUG:
+        expt_id_root = f"hashing/{experiment_id}/"
+        os.makedirs(expt_id_root, exist_ok=True)
+        ls = [i for i in os.listdir(expt_id_root) if os.path.isdir(os.path.join(expt_id_root, i))]
+
+        
+        hasher_expt_root = os.path.join(expt_id_root, f"{len(ls)}")
         print("Logging to", hasher_expt_root)
         os.makedirs(hasher_expt_root, exist_ok=True)
         logger.add(f"{hasher_expt_root}/training.log", level="INFO", format="{time:D-MM-YYYY HH:mm:ss} | {level} | {message}")
@@ -198,32 +204,37 @@ if __name__ == "__main__":
     torch.cuda.empty_cache()
 
     hasher_type = getattr(args, "hasher_type", "SortLRL")
+    hash_outdim = getattr(args, "hash_outdim", max(M,N))
+    hash_latent = getattr(args, "hash_latent", args.xff)
+    args.hasher_type, args.hash_outdim, args.hash_latent = hasher_type, hash_outdim, hash_latent
     if hasher_type == "SortLRL":        # outdim, latent used for inner LRL model
-        qhasher = SortLRL(indim=args.xoutdim, seq_len=M, latent=args.hash_latent, outdim=getattr(args, "hash_outdim", max(M,N))).to(DEVICE)
-        chasher = SortLRL(indim=args.xoutdim, seq_len=N, latent=args.hash_latent, outdim=getattr(args, "hash_outdim", max(M,N))).to(DEVICE)
+        qhasher = SortLRL(indim=args.xoutdim, seq_len=M, latent=hash_latent, outdim=hash_outdim).to(DEVICE)
+        chasher = SortLRL(indim=args.xoutdim, seq_len=N, latent=hash_latent, outdim=hash_outdim).to(DEVICE)
 
     elif hasher_type == "SortNoLRL":    # outdim used for zero-padding
-        qhasher = SortNoLRL(indim=args.xoutdim, outdim=getattr(args, "hash_outdim", max(M,N))).to(DEVICE)
-        chasher = SortNoLRL(indim=args.xoutdim, outdim=getattr(args, "hash_outdim", max(M,N))).to(DEVICE)
+        qhasher = SortNoLRL(indim=args.xoutdim, outdim=hash_outdim).to(DEVICE)
+        chasher = SortNoLRL(indim=args.xoutdim, outdim=hash_outdim).to(DEVICE)
     
     elif hasher_type == "SortL":        # outdim used for single linear layer
-        qhasher = SortL(indim=args.xoutdim, seq_len=M, outdim=getattr(args, "hash_outdim", max(M,N))).to(DEVICE)
-        chasher = SortL(indim=args.xoutdim, seq_len=N, outdim=getattr(args, "hash_outdim", max(M,N))).to(DEVICE)    
+        qhasher = SortL(indim=args.xoutdim, seq_len=M, outdim=hash_outdim).to(DEVICE)
+        chasher = SortL(indim=args.xoutdim, seq_len=N, outdim=hash_outdim).to(DEVICE)    
 
     elif hasher_type == "DeepSet":      # single model can be used for both q and c (agnostic to seq_len)
-        qhasher = DeepSetModel(indim=args.xoutdim, latent=args.hash_latent, outdim=getattr(args, "hash_outdim", max(M,N))).to(DEVICE)
+        qhasher = DeepSetModel(indim=args.xoutdim, latent=hash_latent, outdim=hash_outdim).to(DEVICE)
         if getattr(args, "share_hasher", False):
-            chasher = DeepSetModel(indim=args.xoutdim, latent=args.hash_latent, outdim=getattr(args, "hash_outdim", max(M,N))).to(DEVICE)
+            chasher = DeepSetModel(indim=args.xoutdim, latent=hash_latent, outdim=hash_outdim).to(DEVICE)
         else:
             chasher = qhasher
     hasher = nn.ModuleList([qhasher, chasher])  # grouped so we can use a single optimizer
 
-    optimizer = torch.optim.AdamW(hasher.parameters(), lr=args.lr, amsgrad=True)
-    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode="max", factor=0.95, patience=5, min_lr=1e-6)
+    use_amsgrad = getattr(args, "amsgrad", False)
+    args.use_amsgrad = use_amsgrad
+    optimizer = torch.optim.AdamW(hasher.parameters(), lr=args.lr, amsgrad=use_amsgrad)
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode="max", factor=0.95, patience=5, min_lr=5e-5)
     # criterion = lambda q, c, l: F.cosine_embedding_loss(q, c, l, margin=args.hash_margin)
     # criterion = lambda q, c, l: F.cross_entropy(0.5 * (F.cosine_similarity(q, c) + 1), l)
     # criterion = lambda q, c, l: nn.BCELoss()(0.5 * (F.cosine_similarity(q, c) + 1), l)
-    
+
     def LOSS_ON_SILVER(q, c, l, loss='bce'):
         cs = F.cosine_similarity(q, c).sigmoid() 
         # cs is now in [0,1], original scores "l" are in [0,1]
@@ -232,13 +243,32 @@ if __name__ == "__main__":
         if loss == "mse":
             return F.mse_loss(cs, l)
 
-    criterion = partial(LOSS_ON_SILVER, loss=getattr(args, "loss_type", "bce"))
+    loss_type = args.loss_type
+    criterion = partial(LOSS_ON_SILVER, loss=loss_type)
         
-    sample_scores = getattr(args, "sample_scores", False)
-    total_exploration = getattr(args, "total_exploration", 500)
+    sample_scores = args.sample_scores
+    total_exploration = args.total_exploration 
     pbar = tqdm(range(1,args.nepochs+1,1), disable=False)
     best_val_map = 0
     es = 0
+    
+    if args.wandb:
+        wandb.init(
+            project = "hashing", 
+            config = {
+                "dataset": dataset,
+                "loss_type": loss_type,
+                "hasher_type": hasher_type,
+                "hash_latent": hash_latent,
+                "hash_outdim": hash_outdim,
+                "lr": args.lr,
+                "sample_scores": sample_scores,
+                "total_exploration": total_exploration,
+                "amsgrad": use_amsgrad
+            }   
+        )
+
+
     for epoch in pbar:
         inner_pbar = tqdm(trainloader, disable=False, leave=False)
 
@@ -307,8 +337,23 @@ if __name__ == "__main__":
         logstr = f"Loss: {np.mean(losses):.4f}, Val MAP: {val_map:.4f}, Val MRR: {val_mrr:.4f}, Best Val MAP: {best_val_map:.4f}"
         pbar.set_postfix_str(f"ES: {es:2d}, {logstr}")
 
+        if args.wandb:
+            log = {
+                "loss": np.mean(losses),
+                "val_map": val_map,
+                "val_mrr": val_mrr,
+                "best_val_map": best_val_map,
+                "lr": optimizer.param_groups[0]['lr']
+            }
+            wandb.log(log)
+
         if not DEBUG:
             logger.info(logstr)
+
+    if not DEBUG:
+        # final args update
+        with open(f"{hasher_expt_root}/args.pkl", "wb") as file:
+            pickle.dump(args, file)
 
     hasher.load_state_dict(bestwts)
     hasher.eval()

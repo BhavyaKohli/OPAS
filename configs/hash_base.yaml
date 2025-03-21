@@ -1,2 +1,13 @@
 hash_margin: 0.5
-nepochs: 500
+nepochs: 4000
+lr: 1e-3
+loss_type: "mse"
+batch_size: 128
+
+# defaults
+share_hasher: True
+sample_scores: False
+total_exploration: None
+pos_samps: 10
+debug: False
+wandb: False
