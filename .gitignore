@@ -6,6 +6,7 @@ models_old/
 hashing/
 xhashing/
 baselines/tensors/*.pt
+wandb/
 
 __pycache__/*
 __pycache__/
