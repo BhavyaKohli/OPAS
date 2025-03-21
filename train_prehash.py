@@ -131,6 +131,11 @@ if __name__ == "__main__":
     args = argparse.Namespace(**OmegaConf.merge(args, base_conf, cli_args))
     DEBUG = args.debug
 
+    if args.reproducible:
+        os.environ["CUBLAS_WORKSPACE_CONFIG"] = ":4096:8"
+        torch.use_deterministic_algorithms(True)    #causes .backward() issues with adaptive pooling
+    seed_everything(args.seed)
+
     logger.remove(0)
     if not DEBUG:
         expt_id_root = f"hashing/{experiment_id}/"
