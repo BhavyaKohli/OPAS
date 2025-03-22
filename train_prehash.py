@@ -3,7 +3,9 @@ import wandb
 from main import *
 from loguru import logger
 from time import perf_counter
+
 from opas.models.sortlrl import SortLRL
+from opas.models.set_transformer import SetTransformer
 from opas.models.model_utils import load_models, get_image_embed_model
 
 from opas.data import PairDatasetTrainHPlane, PairDatasetTestHPlane
@@ -232,10 +234,18 @@ if __name__ == "__main__":
             chasher = DeepSetModel(indim=args.xoutdim, latent=hash_latent, outdim=hash_outdim).to(DEVICE)
         else:
             chasher = qhasher
+    
+    elif hasher_type == "SetTransformer":
+        qhasher = SetTransformer(dim_input=args.xoutdim, num_outputs=1, dim_output=hash_outdim, dim_hidden=hash_latent).to(DEVICE)
+        if getattr(args, "share_hasher", False):
+            chasher = SetTransformer(dim_input=args.xoutdim, num_outputs=1, dim_output=hash_outdim, dim_hidden=hash_latent).to(DEVICE)
+        else:
+            chasher = qhasher
+    
     hasher = nn.ModuleList([qhasher, chasher])  # grouped so we can use a single optimizer
 
     use_amsgrad = getattr(args, "amsgrad", False)
-    args.use_amsgrad = use_amsgrad
+    args.amsgrad = use_amsgrad
     optimizer = torch.optim.AdamW(hasher.parameters(), lr=args.lr, amsgrad=use_amsgrad)
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode="max", factor=0.95 if args.scheduler else 1, patience=20, min_lr=5e-5)
     # criterion = lambda q, c, l: F.cosine_embedding_loss(q, c, l, margin=args.hash_margin)
@@ -330,17 +340,18 @@ if __name__ == "__main__":
         #     raise
         scheduler.step(val_map)
 
-        if val_map >= best_val_map + 1e-8:
-            best_val_map = val_map
-            es = 0
-            if not DEBUG:
-                torch.save(hasher, f"{hasher_expt_root}/hasher_best.pt")
-            bestwts = hasher.state_dict()
-        else:
-            es += 1
-            if es > 100:
-                print(f"Early stopping at epoch {epoch}")
-                break
+        if epoch >= 500:
+            if val_map >= best_val_map + 1e-8:
+                best_val_map = val_map
+                es = 0
+                if not DEBUG:
+                    torch.save(hasher, f"{hasher_expt_root}/hasher_best.pt")
+                bestwts = hasher.state_dict()
+            else:
+                es += 1
+                if es > 100:
+                    print(f"Early stopping at epoch {epoch}")
+                    break
         logstr = f"Loss: {np.mean(losses):.4f}, Val MAP: {val_map:.4f}, Val MRR: {val_mrr:.4f}, Best Val MAP: {best_val_map:.4f}"
         pbar.set_postfix_str(f"ES: {es:2d}, {logstr}")
 
