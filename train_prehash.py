@@ -142,10 +142,9 @@ if __name__ == "__main__":
     if not DEBUG:
         expt_id_root = f"hashing/{experiment_id}/"
         os.makedirs(expt_id_root, exist_ok=True)
-        ls = [i for i in os.listdir(expt_id_root) if os.path.isdir(os.path.join(expt_id_root, i))]
-
+        ls = [int(i) for i in os.listdir(expt_id_root) if os.path.isdir(os.path.join(expt_id_root, i))]
         
-        hasher_expt_root = os.path.join(expt_id_root, f"{len(ls)}")
+        hasher_expt_root = os.path.join(expt_id_root, f"{max(ls)+1}")
         print("Logging to", hasher_expt_root)
         os.makedirs(hasher_expt_root, exist_ok=True)
         logger.add(f"{hasher_expt_root}/training.log", level="INFO", format="{time:D-MM-YYYY HH:mm:ss} | {level} | {message}")
