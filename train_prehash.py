@@ -339,14 +339,15 @@ if __name__ == "__main__":
         #     raise
         scheduler.step(val_map)
 
-        if epoch >= 500:
-            if val_map >= best_val_map + 1e-8:
-                best_val_map = val_map
-                es = 0
-                if not DEBUG:
-                    torch.save(hasher, f"{hasher_expt_root}/hasher_best.pt")
-                bestwts = hasher.state_dict()
-            else:
+        
+        if val_map >= best_val_map + 1e-8:
+            best_val_map = val_map
+            if epoch >= 200: es = 0
+            if not DEBUG:
+                torch.save(hasher, f"{hasher_expt_root}/hasher_best.pt")
+            bestwts = hasher.state_dict()
+        else:
+            if epoch >= 200:
                 es += 1
                 if es > 100:
                     print(f"Early stopping at epoch {epoch}")
