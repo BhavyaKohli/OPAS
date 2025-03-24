@@ -143,8 +143,10 @@ if __name__ == "__main__":
         expt_id_root = f"hashing/{experiment_id}/"
         os.makedirs(expt_id_root, exist_ok=True)
         ls = [int(i) for i in os.listdir(expt_id_root) if os.path.isdir(os.path.join(expt_id_root, i))]
-        
-        hasher_expt_root = os.path.join(expt_id_root, f"{max(ls)+1}")
+        if len(ls) > 0:
+            hasher_expt_root = os.path.join(expt_id_root, f"{max(ls)+1}")
+        else:
+            hasher_expt_root = os.path.join(expt_id_root, "0")
         print("Logging to", hasher_expt_root)
         os.makedirs(hasher_expt_root, exist_ok=True)
         logger.add(f"{hasher_expt_root}/training.log", level="INFO", format="{time:D-MM-YYYY HH:mm:ss} | {level} | {message}")
@@ -170,7 +172,7 @@ if __name__ == "__main__":
     TEST_FILE = f"{DATA_ROOT}/{dataset}_test_dset.pt"
 
     st = perf_counter()
-    if not os.path.exists(TRAIN_FILE) or not os.path.exists(VAL_FILE) or not os.path.exists(TEST_FILE):
+    if not (os.path.exists(TRAIN_FILE) and os.path.exists(VAL_FILE) and os.path.exists(TEST_FILE)):
         model, scoremodel, embed_model, preembed_model, aggregator = load_models(name="best", expt_root=expt_root, device=DEVICE, args=args)
         model.eval(), scoremodel.eval(), embed_model.eval(), preembed_model.eval()
         if aggregator is not None:
@@ -179,25 +181,30 @@ if __name__ == "__main__":
         for m in [model, scoremodel, embed_model, preembed_model]:
             for param in m.parameters():
                 param.requires_grad = False
+        
+        dataset = args.dataset
+        DATA_ROOT_og = f"final_data/{dataset}"
+        TRAIN_FILE_og = f"{DATA_ROOT_og}/dataset_train.hdf5"
+        VAL_FILE_og = f"{DATA_ROOT_og}/dataset_val.hdf5"
+        TEST_FILE_og = f"{DATA_ROOT_og}/dataset_test.hdf5"
 
-        image_embed_model, TRAIN_FILE, VAL_FILE, TEST_FILE = get_image_embed_model(dataset, [TRAIN_FILE, VAL_FILE, TEST_FILE], device=DEVICE)
+        image_embed_model, TRAIN_FILE_og, VAL_FILE_og, TEST_FILE_og = get_image_embed_model(dataset, [TRAIN_FILE_og, VAL_FILE_og, TEST_FILE_og], device=DEVICE)
     
         hasher = [nn.Identity(), nn.Identity()]
-        models = [model, scoremodel, embed_model, preembed_model, hasher]
+        models = [model, scoremodel, embed_model, preembed_model, image_embed_model, hasher]
 
-        train_dataset = PairDatasetTestHPlane(TRAIN_FILE, models=models, args=args) #, num_q=args.num_q, negative_exploration=args.neg_expl)
-        val_dataset = PairDatasetTestHPlane(VAL_FILE, models=models, args=args)
-        test_dataset = PairDatasetTestHPlane(TEST_FILE, models=models, args=args)
+        train_dataset = PairDatasetTestHPlane(TRAIN_FILE_og, models=models, args=args) #, num_q=args.num_q, negative_exploration=args.neg_expl)
+        val_dataset = PairDatasetTestHPlane(VAL_FILE_og, models=models, args=args)
+        test_dataset = PairDatasetTestHPlane(TEST_FILE_og, models=models, args=args)
 
         save_dataset_to_file(train_dataset, TRAIN_FILE)
         save_dataset_to_file(val_dataset, VAL_FILE)
         save_dataset_to_file(test_dataset, TEST_FILE)
     
-    else:
-        logger.info("Loading datasets from files")
-        train_dataset = LoadedDset(TRAIN_FILE)
-        val_dataset = LoadedDset(VAL_FILE)
-        test_dataset = LoadedDset(TEST_FILE)
+    logger.info("Loading datasets from files")
+    train_dataset = LoadedDset(TRAIN_FILE)
+    val_dataset = LoadedDset(VAL_FILE)
+    test_dataset = LoadedDset(TEST_FILE)
         
     print(f"Datasets loaded in {perf_counter() - st:.3f}s")
 
