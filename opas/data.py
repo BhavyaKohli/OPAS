@@ -143,10 +143,10 @@ class PairDatasetTrainHPlane(PairDatasetTrain):
         # models: (model, scoremodel, embed_model, preembed_model, hasher)
         super().__init__(filepath, num_q, negative_exploration, seed)
 
-        model, scoremodel, embed_model, preembed_model, hasher = models
+        model, scoremodel, embed_model, preembed_model, image_embed_model, hasher = models
         with torch.no_grad():
-            q_emb = embed_full_corpus(DummyDataset(self.q), embed_model, preembed_model, inner_batch_size=200, verbose=True)
-            c_emb = embed_full_corpus(DummyDataset(self.c), embed_model, preembed_model, inner_batch_size=200, verbose=True)
+            q_emb = embed_full_corpus(DummyDataset(self.q), embed_model, preembed_model, image_embed_model, inner_batch_size=200, verbose=True)
+            c_emb = embed_full_corpus(DummyDataset(self.c), embed_model, preembed_model, image_embed_model, inner_batch_size=200, verbose=True)
             # q_emb, c_emb on device
             self.qcscores = get_all_pair_scores(q_emb, c_emb, models=[model, scoremodel], args=args)
             self.q = hasher[0](q_emb).cpu()
@@ -186,12 +186,11 @@ class PairDatasetTestHPlaneSampled(PairDatasetTrainHPlane):
 class PairDatasetTestHPlane(PairDatasetTest):
     def __init__(self, filepath, models, args):
         super().__init__(filepath)
-        model, scoremodel, embed_model, preembed_model, hasher = models
+        model, scoremodel, embed_model, preembed_model, image_embed_model, hasher = models
 
-        model, scoremodel, embed_model, preembed_model, hasher = models
         with torch.no_grad():
-            q_emb = embed_full_corpus(DummyDataset(self.q), embed_model, preembed_model, inner_batch_size=200, verbose=True)
-            c_emb = embed_full_corpus(DummyDataset(self.c), embed_model, preembed_model, inner_batch_size=200, verbose=True)
+            q_emb = embed_full_corpus(DummyDataset(self.q), embed_model, preembed_model, image_embed_model, inner_batch_size=200, verbose=True)
+            c_emb = embed_full_corpus(DummyDataset(self.c), embed_model, preembed_model, image_embed_model, inner_batch_size=200, verbose=True)
             # q_emb, c_emb on device
             self.qcscores = get_all_pair_scores(q_emb, c_emb, models=[model, scoremodel], args=args)
             self.q = hasher[0](q_emb).cpu()
@@ -210,12 +209,11 @@ class PairDatasetTestHPlane(PairDatasetTest):
 class PairDatasetTrainHPlaneQCSc(PairDatasetTest):
     def __init__(self, filepath, models, args):
         super().__init__(filepath)
-        model, scoremodel, embed_model, preembed_model, hasher = models
+        model, scoremodel, embed_model, preembed_model, image_embed_model, hasher = models
 
-        model, scoremodel, embed_model, preembed_model, hasher = models
         with torch.no_grad():
-            q_emb = embed_full_corpus(DummyDataset(self.q), embed_model, preembed_model, inner_batch_size=200, verbose=True)
-            c_emb = embed_full_corpus(DummyDataset(self.c), embed_model, preembed_model, inner_batch_size=200, verbose=True)
+            q_emb = embed_full_corpus(DummyDataset(self.q), embed_model, preembed_model, image_embed_model, inner_batch_size=200, verbose=True)
+            c_emb = embed_full_corpus(DummyDataset(self.c), embed_model, preembed_model, image_embed_model, inner_batch_size=200, verbose=True)
             # q_emb, c_emb on device
             self.qcscores = get_all_pair_scores(q_emb, c_emb, models=[model, scoremodel], args=args)
             self.q = hasher[0](q_emb).cpu()
