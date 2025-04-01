@@ -111,6 +111,44 @@ class LSH(object):
         # queries: (n, d)
         return [self.query(q, k, distance_func, kbits) for q in queries]
     
+    def _query_single_loose_multi_kbits(self, query, kbits):
+        # returns all items where first k bits of hash match, k bits is a list
+        hashcodes = self.hashall(query)
+        result_idxs = {k: [] for k in kbits}
+        for t, code in enumerate(hashcodes):
+            key = self._cvt_index_to_hashstr(code)
+            for kcom in kbits:
+                matching_keys = [k for k in self.tables[t].keys() if k[:kcom] == key[:kcom]]
+                for mk in matching_keys:
+                    matches = self.tables[t].get(mk, torch.tensor([]))
+                    if len(matches) > 0:
+                        result_idxs[kcom].append(matches)
+        
+        for kcom in kbits:
+            result_idxs[kcom] = torch.cat(result_idxs[kcom]).unique()
+        matches_out = {kcom: result_idxs[kcom] for kcom in kbits}
+        
+        return matches_out, result_idxs
+
+    def query_multi_kbits(self, qidx, k, kbits, distance_func="orig"):
+        query = self.q[qidx]
+        matches, match_idxs = self._query_single_loose_multi_kbits(query, kbits)
+        
+        if distance_func == "orig":
+            sims = {kcom: self.sims[qidx][match_idxs[kcom]] for kcom in kbits}
+        else:
+            if distance_func == "cosine":
+                f = LSH.CosineSimilarity
+            elif distance_func == "euclidean" or distance_func == "mse":
+                f = LSH.EuclideanDistance 
+            sims = {kcom: f(query[None].repeat_interleave(len(matches[kcom]), dim=0), matches[kcom]) for kcom in kbits}
+        
+        for kcom in kbits:
+            topk = sims[kcom].topk(k=k if k else len(sims[kcom])).indices
+            matches[kcom] = matches[kcom][topk]
+            match_idxs[kcom] = match_idxs[kcom][topk]
+        return matches, match_idxs, sims        
+
     @staticmethod
     def CosineSimilarity(x, y):
         return 0.5 * (F.cosine_similarity(x, y) + 1)
@@ -125,7 +163,7 @@ if __name__ == "__main__":
     
     expt_id = cli_args.expt_id
     hasher_expt_num = cli_args.hexpt_num
-    hasher_expt_root = f"hashing/{expt_id}_{hasher_expt_num}/"
+    hasher_expt_root = f"hashing/{expt_id}/{hasher_expt_num}/"
     expt_root = f"models/{expt_id}/"
 
     import pickle
@@ -174,7 +212,7 @@ if __name__ == "__main__":
         VAL_FILE = f"{DATA_ROOT}/dataset_val.hdf5"
         TEST_FILE = f"{DATA_ROOT}/dataset_test.hdf5"
 
-        image_embed_model, TRAIN_FILE, VAL_FILE, TEST_FILE = get_image_embed_model(dataset, TRAIN_FILE, VAL_FILE, TEST_FILE)
+        image_embed_model, TRAIN_FILE, VAL_FILE, TEST_FILE = get_image_embed_model(dataset, [TRAIN_FILE, VAL_FILE, TEST_FILE], device=DEVICE)
 
         train_dataset = PairDatasetTest(TRAIN_FILE)
         val_dataset = PairDatasetTest(VAL_FILE)
@@ -219,13 +257,16 @@ if __name__ == "__main__":
         corpus_embedded = hasher[1](corpus_embedded.to(DEVICE)).cpu()
         test_query_embedded = hasher[0](test_query_embedded.to(DEVICE)).cpu()
     
-    k = None
+    topk = None
     nbits = args.m
     kbits = getattr(args, "kbits", nbits)
+    if type(kbits) == int:
+        kbits = [kbits]
     L = args.L
     data_dim = corpus_embedded.shape[-1]
     hyperplanes_file = f'{hasher_expt_root}/{args.hplanes}.pkl'
 
+    seed_everything(args.seed)
     lsh = LSH(
         hash_size=nbits,
         input_dim=data_dim,
@@ -237,27 +278,55 @@ if __name__ == "__main__":
     )
     lsh.index(corpus_embedded)
 
-    num_matches, num_relevant = [], []
-    ranked_output = []
-    MAP = []
-    for i in tqdm(range(len(lsh.q)), desc="Evaluating..."):
-        matches, match_idxs, sims = lsh.query(i, k, distance_func="orig", kbits=kbits)
-        sims = sorted(sims, reverse=True)
-        true_labels = labels[i]
-        total_rel = true_labels.sum().item()
+    num_matches, num_relevant = {k: [] for k in kbits}, {k: [] for k in kbits}
+    ranked_output = {k: [] for k in kbits}
+    MAP = {k: [] for k in kbits}
+    for i in tqdm(range(len(lsh.q[:100])), desc="Evaluating..."):
+        matches, match_idxs, sims = lsh.query_multi_kbits(i, topk, kbits, distance_func="orig")
+        for k in kbits:
+            sims[k] = sorted(sims[k], reverse=True)
+            true_labels = labels[i]
+            total_rel = true_labels.sum().item()
 
-        true_labels = torch.cat([true_labels[match_idxs], torch.zeros(len(sims) - len(match_idxs))])
-        retrieved_rel = true_labels.sum().item()
-        
-        MAP.append(average_precision_score(true_labels, sims) * retrieved_rel / total_rel)
+            true_labels = torch.cat([true_labels[match_idxs[k]], torch.zeros(len(sims[k]) - len(match_idxs[k]))])
+            retrieved_rel = true_labels.sum().item()
+            
+            MAP[k].append(average_precision_score(true_labels, sims[k]) * retrieved_rel / total_rel)
 
-        num_matches.append(len(matches))
-        num_relevant.append(true_labels.sum().item())
+            num_matches[k].append(len(matches[k]))
+            num_relevant[k].append(true_labels.sum().item())
+    MAP = {k: np.mean(MAP[k]) for k in kbits}
+    for k in kbits:
+        print(f"{k}, MAP: {MAP[k]}, Mean matches: {np.mean(num_matches[k]):.2f}, Mean relevant: {np.mean(num_relevant[k]):.2f}")
 
-    MAP = np.mean(MAP)
+    import ipdb; ipdb.set_trace()
 
     with open(f"{hasher_expt_root}/lsh_perf.csv", "a+") as f:
-        f.write(f"{kbits}, {MAP:.4f}, {np.mean(num_matches):.2f}, {np.mean(num_relevant):.2f}\n")
-    
-    print(f"MAP: {MAP:.4f},")
-    print(f"Mean matches: {np.mean(num_matches):.2f}, Mean relevant: {np.mean(num_relevant):.2f}")
+        for k in kbits:
+            f.write(f"{k}, {MAP[k]:.4f}, {np.mean(num_matches[k]):.2f}, {np.mean(num_relevant[k]):.2f}\n")
+
+    # else:
+    #     num_matches, num_relevant = [], []
+    #     ranked_output = []
+    #     MAP = []
+    #     for i in tqdm(range(len(lsh.q)), desc="Evaluating..."):
+    #         matches, match_idxs, sims = lsh.query(i, k, distance_func="orig", kbits=kbits)
+    #         sims = sorted(sims, reverse=True)
+    #         true_labels = labels[i]
+    #         total_rel = true_labels.sum().item()
+
+    #         true_labels = torch.cat([true_labels[match_idxs], torch.zeros(len(sims) - len(match_idxs))])
+    #         retrieved_rel = true_labels.sum().item()
+            
+    #         MAP.append(average_precision_score(true_labels, sims) * retrieved_rel / total_rel)
+
+    #         num_matches.append(len(matches))
+    #         num_relevant.append(true_labels.sum().item())
+
+    #     MAP = np.mean(MAP)
+
+    #     with open(f"{hasher_expt_root}/lsh_perf.csv", "a+") as f:
+    #         f.write(f"{kbits}, {MAP:.4f}, {np.mean(num_matches):.2f}, {np.mean(num_relevant):.2f}\n")
+        
+    #     print(f"MAP: {MAP:.4f},")
+    #     print(f"Mean matches: {np.mean(num_matches):.2f}, Mean relevant: {np.mean(num_relevant):.2f}")
