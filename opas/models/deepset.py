@@ -29,9 +29,10 @@ class DeepSetModel(nn.Module):
         # output batch x outdim
         
         x = self.rho(x)   # batch x M/N x latent
-        if self.aggr == "sum":
+        aggr = getattr(self, "aggr", "sum")
+        if aggr == "sum":
             x = torch.sum(x, dim=1) # batch x latent
-        elif self.aggr == "max":
+        elif aggr == "max":
             x = torch.max(x, dim=1).values
         x = x + self.alpha
         x = self.phi(x)  # batch x outdim
