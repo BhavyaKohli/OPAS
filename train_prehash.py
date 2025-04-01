@@ -221,7 +221,9 @@ if __name__ == "__main__":
     try: hash_outdim = args.outdim
     except: pass
     hash_latent = getattr(args, "hash_latent", args.xff)
+    aggr = getattr(args, "aggr", "sum")
     args.hasher_type, args.hash_outdim, args.hash_latent = hasher_type, hash_outdim, hash_latent
+    args.aggr = aggr
     if hasher_type == "SortLRL":        # outdim, latent used for inner LRL model
         qhasher = SortLRL(indim=args.xoutdim, seq_len=M, latent=hash_latent, outdim=hash_outdim).to(DEVICE)
         chasher = SortLRL(indim=args.xoutdim, seq_len=N, latent=hash_latent, outdim=hash_outdim).to(DEVICE)
@@ -235,9 +237,9 @@ if __name__ == "__main__":
         chasher = SortL(indim=args.xoutdim, seq_len=N, outdim=hash_outdim).to(DEVICE)    
 
     elif hasher_type == "DeepSet":      # single model can be used for both q and c (agnostic to seq_len)
-        qhasher = DeepSetModel(indim=args.xoutdim, latent=hash_latent, outdim=hash_outdim).to(DEVICE)
+        qhasher = DeepSetModel(indim=args.xoutdim, latent=hash_latent, outdim=hash_outdim, aggr=aggr).to(DEVICE)
         if getattr(args, "share_hasher", False):
-            chasher = DeepSetModel(indim=args.xoutdim, latent=hash_latent, outdim=hash_outdim).to(DEVICE)
+            chasher = DeepSetModel(indim=args.xoutdim, latent=hash_latent, outdim=hash_outdim, aggr=aggr).to(DEVICE)
         else:
             chasher = qhasher
     
