@@ -78,7 +78,8 @@ class LSH(object):
         result_idxs = []
         for t, code in enumerate(hashcodes):
             key = self._cvt_index_to_hashstr(code)
-            matching_keys = [k for k in self.tables[t].keys() if k[:kbits] == key[:kbits]]
+            random_k_idxs = np.random.permutation(self.m)[:kbits]
+            matching_keys = [k for k in self.tables[t].keys() if k[random_k_idxs] == key[random_k_idxs]]
             for mk in matching_keys:
                 matches = self.tables[t].get(mk, torch.tensor([]))
                 if len(matches) > 0:
