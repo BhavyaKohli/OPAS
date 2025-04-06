@@ -89,14 +89,14 @@ if __name__ == "__main__":
     np.random.seed(15)
     if args.dataset_name == "CIFAR":
         classes = [0, 1, 2, 3, 4, 5]
-        num_samples = 20
+        num_samples = 100
     elif args.dataset_name == "LSUN":
         classes = [0]
         num_samples = 200
 
     train_samples = sample(trainset, classes, num_samples)
-    val_samples = sample(valset, classes, num_samples//2)
-    test_samples = sample(testset, classes, num_samples//2)
+    val_samples = sample(valset, classes, num_samples)
+    test_samples = sample(testset, classes, num_samples)
 
     dataset_save_path = f"rotated_sequences_{args.dataset_name}_{args.seq_len}.hdf5"
     if os.path.exists(dataset_save_path):
@@ -104,7 +104,8 @@ if __name__ == "__main__":
         time.sleep(2)
         os.remove(dataset_save_path)
 
-    maxlim = 180 if args.seq_len <= 20 else 270
+    # maxlim = 180 if args.seq_len <= 20 else 270
+    maxlim = 270
     ANGLES = np.linspace(0, maxlim, args.seq_len, endpoint=True)
     for split, dset in zip(["train", "val", "test"], [train_samples, val_samples, test_samples]):
         data, _ = dset
