@@ -276,6 +276,7 @@ if __name__ == "__main__":
     pbar = tqdm(range(1,args.nepochs+1,1), disable=False)
     best_val_map = 0
     es = 0
+    warmup = 200 if dataset != "cifar" else 500
     
     if args.wandb:
         wandb.init(
@@ -292,7 +293,6 @@ if __name__ == "__main__":
                 "amsgrad": use_amsgrad
             }   
         )
-
 
     for epoch in pbar:
         inner_pbar = tqdm(trainloader, disable=False, leave=False)
@@ -351,12 +351,12 @@ if __name__ == "__main__":
         
         if val_map >= best_val_map + 1e-8:
             best_val_map = val_map
-            if epoch >= 200: es = 0
+            if epoch >= warmup: es = 0
             if not DEBUG:
                 torch.save(hasher, f"{hasher_expt_root}/hasher_best.pt")
             bestwts = hasher.state_dict()
         else:
-            if epoch >= 200:
+            if epoch >= warmup:
                 es += 1
                 if es > 100:
                     print(f"Early stopping at epoch {epoch}")

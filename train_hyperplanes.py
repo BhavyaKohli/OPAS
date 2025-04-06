@@ -188,8 +188,8 @@ if __name__ == "__main__":
             c = torch.cat((c, cpos), dim=0).to(DEVICE)
             sc = torch.cat((sc, scpos), dim=0).float().to(DEVICE)
 
-            qproj = torch.einsum("nmd,bd->nbm", W, q).tanh()   # (nplanes, batch_size, nbits)
-            cproj = torch.einsum("nmd,bd->nbm", W, c).tanh()   # (nplanes, batch_size, nbits)
+            qproj = torch.einsum("nmd,bd->nbm", W, q).tanh()   # (nplanes, batch_size, nbits), verified
+            cproj = torch.einsum("nmd,bd->nbm", W, c).tanh()   # (nplanes, batch_size, nbits), verified
 
             loss = get_loss(qproj, cproj, sc, l1, l2, l3)[0]
 
