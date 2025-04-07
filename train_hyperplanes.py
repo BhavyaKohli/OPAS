@@ -3,17 +3,19 @@ from torch.utils.data import DataLoader, TensorDataset
 from opas.data import DummyDataset, PairDatasetTrainHPlane, PairDatasetTestHPlane, PairDatasetTestHPlaneSampled
         
 
-def get_loss(qproj, cproj, sc, l1=1e-3, l2=1e-1, l3=1e-6):
+def get_loss(qproj, cproj, sc, l2_version=1, l1=1e-3, l2=1e-1, l3=1e-6):
     loss1 = torch.norm(cproj.abs() - 1, p=1, dim=-1).sum(-1)    # fence sitting, sum over batch
     loss1 = loss1.mean()    # mean over planes
-    # loss2 = cproj.sum(dim=1).abs().sum(dim=-1)                  # bit balance, sum over bits
-    # loss2 = loss2.mean()    # mean over planes
-
-    # kron
-    bbkron = torch.vmap(torch.vmap(torch.kron))
-    c_kron_c = bbkron(cproj, cproj)                             # (nplanes, batch_size, nbits**2)
-    loss2 = c_kron_c.sum(dim=1).abs().sum(dim=-1)
+    loss2 = cproj.sum(dim=1).abs().sum(dim=-1)                  # bit balance, sum over bits
     loss2 = loss2.mean()    # mean over planes
+
+    if l2_version == 2:
+        # kron
+        bbkron = torch.vmap(torch.vmap(torch.kron))
+        c_kron_c = bbkron(cproj, cproj)                             # (nplanes, batch_size, nbits**2)
+        loss2_ = c_kron_c.sum(dim=1).abs().sum(dim=-1)
+        loss2_ = loss2_.mean()    # mean over planes
+        loss2 = loss2 + 1e-3 * loss2_
     
     dots = torch.einsum("wbd,wbd->wb", qproj, cproj)            # (nplanes, batch_size), verified
     ktop = torch.topk(sc, k=len(sc)).indices
@@ -172,6 +174,8 @@ if __name__ == "__main__":
     hplanes_id = f"{args.nbits}_{datetime.now():%H%M}"
     logger.info(f"Hyperplane file: hyperplanes_{hplanes_id}.pkl, Loss Weights: {l1=}, {l2=}, {l3=}, Args: {args}")
 
+    get_loss = partial(get_loss, l2_version=getattr(args, "l2v", 1), l1=l1, l2=l2, l3=l3)
+
     pbar = tqdm(range(1,args.nepochs+1,1), disable=False)
     best = -np.inf
     es = 0
@@ -191,7 +195,7 @@ if __name__ == "__main__":
             qproj = torch.einsum("nmd,bd->nbm", W, q).tanh()   # (nplanes, batch_size, nbits), verified
             cproj = torch.einsum("nmd,bd->nbm", W, c).tanh()   # (nplanes, batch_size, nbits), verified
 
-            loss = get_loss(qproj, cproj, sc, l1, l2, l3)[0]
+            loss = get_loss(qproj, cproj, sc)[0]
 
             optimizer.zero_grad()
             loss.backward()
@@ -229,7 +233,7 @@ if __name__ == "__main__":
                 qproj = torch.einsum("nmd,bd->nbm", W, q).tanh()   # (nplanes, batch_size, nbits)
                 cproj = torch.einsum("nmd,bd->nbm", W, c).tanh()   # (nplanes, batch_size, nbits)
 
-                loss = get_loss(qproj, cproj, sc, l1, l2, l3)[-1]
+                loss = get_loss(qproj, cproj, sc)[-1]
                 val_loss.append(loss.item())            
             val_loss = np.mean(val_loss)
             metric = -val_loss
