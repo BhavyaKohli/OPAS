@@ -15,6 +15,7 @@ __pycache__/
 
 tmp/
 
+nb*
 *.pkl
 
 *gt/
