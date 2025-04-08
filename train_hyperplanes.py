@@ -3,7 +3,7 @@ from torch.utils.data import DataLoader, TensorDataset
 from opas.data import DummyDataset, PairDatasetTrainHPlane, PairDatasetTestHPlane, PairDatasetTestHPlaneSampled
         
 
-def get_loss(qproj, cproj, sc, l2_version=1, l1=1e-3, l2=1e-1, l3=1e-6):
+def get_loss(qproj, cproj, sc, l2_version=1, l1=1e-3, l2=1e-1, l3=1e-3):
     loss1 = torch.norm(cproj.abs() - 1, p=1, dim=-1).sum(-1)    # fence sitting, sum over batch
     loss1 = loss1.mean()    # mean over planes
     loss2 = cproj.sum(dim=1).abs().sum(dim=-1)                  # bit balance, sum over bits
@@ -171,7 +171,7 @@ if __name__ == "__main__":
     print(f"Global corpus shape: {global_corpus.shape}")
 
     l1, l2, l3 = getattr(args, "l1", 1e-3), getattr(args, "l2", 1e-1), getattr(args, "l3", 1e-3)
-    hplanes_id = f"{args.nbits}_{datetime.now():%H%M}"
+    hplanes_id = f"{args.nbits}_{datetime.now():%d%m%H%M}"
     logger.info(f"Hyperplane file: hyperplanes_{hplanes_id}.pkl, Loss Weights: {l1=}, {l2=}, {l3=}, Args: {args}")
 
     get_loss = partial(get_loss, l2_version=getattr(args, "l2v", 1), l1=l1, l2=l2, l3=l3)
