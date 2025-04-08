@@ -297,8 +297,9 @@ if __name__ == "__main__":
             num_matches[k].append(len(matches[k]))
             num_relevant[k].append(true_labels.sum().item())
     MAP = {k: np.mean(MAP[k]) for k in kbits}
-    for k in kbits:
-        print(f"{k}, MAP: {MAP[k]}, Mean matches: {np.mean(num_matches[k]):.2f}, Mean relevant: {np.mean(num_relevant[k]):.2f}")
+    # for k in kbits:
+    #     print(f"{k}, MAP: {MAP[k]}, Mean matches: {np.mean(num_matches[k]):.2f}, Mean relevant: {np.mean(num_relevant[k]):.2f}")
+    print([i for j in [(MAP[k], np.mean(num_matches[k]), np.mean(num_relevant[k])) for k in kbits] for i in j])
 
     import ipdb; ipdb.set_trace()
 
