@@ -187,6 +187,7 @@ if __name__ == "__main__":
     except:
         pass
     logger.info(f"Hyperplane file: hyperplanes_{hplanes_id}.pkl, Loss Weights: {l1=}, {l2=}, {l3=}, Args: {args}")
+    hplane_filename = f"{hasher_expt_root}/hyperplanes_{hplanes_id}.pkl"
 
     get_loss = partial(get_loss, l2_version=getattr(args, "l2v", 1), l1=l1, l2=l2, l3=l3)
 
@@ -256,21 +257,21 @@ if __name__ == "__main__":
             best = metric
             es = 0
             if not DEBUG:
-                torch.save(W, f"{hasher_expt_root}/hyperplanes_{hplanes_id}.pkl")
+                torch.save(W, hplane_filename)
         else:
             es += 1
-            if es == 50:
+            if es == 25:
                 break
 
         pbar.set_postfix_str(f"ES: {es:2d}, Index Spread: {mu:4f}, Best <{track_metric}>: {best:.4f}")
 
     if not DEBUG:
         # saving planes in numpy format for using in lshash3
-        W = torch.load(f"{hasher_expt_root}/hyperplanes_{hplanes_id}.pkl").cpu().detach().numpy()
+        W = torch.load(hplane_filename).cpu().detach().numpy()
         np.savez_compressed(f"{hasher_expt_root}/weights.npz", *W)
 
     if getattr(args, "run_lsh_eval", False):
-        cmd = f"python eval_lsh.py expt_id={experiment_id} hexpt_num={hasher_expt_num} device={DEVICE} m=10 L=30 hplanes=hyperplanes_{hplanes_id} kbits=[10,8,6,4,2,1] seed=69 save_expt_num={args.save_expt_num} skip_logging=True"
+        cmd = f"python eval_lsh.py expt_id={experiment_id} hexpt_num={hasher_expt_num} device={DEVICE[-1]} m=10 L=30 hplanes=hyperplanes_{hplanes_id} kbits=[10,8,6,4,2,1] seed=69 save_expt_num={args.save_expt_num} skip_logging=True"
         ret = os.system(cmd)
         
         if ret == 2:
@@ -279,6 +280,8 @@ if __name__ == "__main__":
         perf = np.load(f"tmp/multi/tmp_{args.save_expt_num}.npy").tolist()
         perf = [l1, l2, l3] + perf
         np.save(f"tmp/multi/tmp_{args.save_expt_num}.npy", perf)
-
-        with open("tmp/lsh_multi_final.txt", "a+") as f:
-            f.write(f"{perf}\n")
+        try:
+            with open("tmp/lsh_multi_final.txt", "a+") as f:
+                f.write(f"{perf}\n")
+        except:
+            pass
