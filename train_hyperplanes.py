@@ -88,6 +88,15 @@ def validation_map(dataset, qproj, cproj):
 if __name__ == "__main__":
     cli_args = OmegaConf.from_cli()
 
+    try:
+        if cli_args.disable_logging:
+            def noop(*args, **kwargs):
+                pass
+            logger.info = noop
+        skip_logging = True
+    except:
+        skip_logging = False
+
     experiment_id = cli_args.expt_id
     folder = "models" if not getattr(cli_args, "old", None) else "models_old"
     expt_root = f"{folder}/{experiment_id}/"
@@ -109,7 +118,8 @@ if __name__ == "__main__":
     args = OmegaConf.create(vars(args))
     base_conf = OmegaConf.load(f"configs/hyperplane_base.yaml")
     hplane_args = OmegaConf.merge(base_conf, cli_args)
-    print(f"Hyperplane args: {hplane_args}")
+    if not skip_logging:
+        print(f"Hyperplane args: {hplane_args}")
 
     args = argparse.Namespace(**OmegaConf.merge(args, hplane_args))
 
@@ -168,21 +178,25 @@ if __name__ == "__main__":
     trainloader = train_dataset.get_dataloader(batch_size=args.batch_size, shuffle=True)
     valloader = val_dataset.get_dataloader(batch_size=args.batch_size, shuffle=False)
     global_corpus = torch.cat((train_dataset.c, val_dataset.c, test_dataset.c), axis=0)
-    print(f"Global corpus shape: {global_corpus.shape}")
+    logger.info(f"Global corpus shape: {global_corpus.shape}")
 
     l1, l2, l3 = getattr(args, "l1", 1e-3), getattr(args, "l2", 1e-1), getattr(args, "l3", 1e-3)
     hplanes_id = f"{args.nbits}_{datetime.now():%d%m%H%M}"
+    try:
+        hplanes_id = args.hplanes_id_override
+    except:
+        pass
     logger.info(f"Hyperplane file: hyperplanes_{hplanes_id}.pkl, Loss Weights: {l1=}, {l2=}, {l3=}, Args: {args}")
 
     get_loss = partial(get_loss, l2_version=getattr(args, "l2v", 1), l1=l1, l2=l2, l3=l3)
 
-    pbar = tqdm(range(1,args.nepochs+1,1), disable=False)
+    pbar = tqdm(range(1,args.nepochs+1,1), disable=skip_logging)
     best = -np.inf
     es = 0
     track_metric = getattr(args, "track_metric", "index_spread")
 
     for epoch in pbar:
-        inner_pbar = tqdm(trainloader, disable=False, leave=False)
+        inner_pbar = tqdm(trainloader, disable=skip_logging, leave=False)
 
         train_loss = []
         for i, (q, c, sc) in enumerate(inner_pbar):
@@ -245,7 +259,7 @@ if __name__ == "__main__":
                 torch.save(W, f"{hasher_expt_root}/hyperplanes_{hplanes_id}.pkl")
         else:
             es += 1
-            if es == 100:
+            if es == 50:
                 break
 
         pbar.set_postfix_str(f"ES: {es:2d}, Index Spread: {mu:4f}, Best <{track_metric}>: {best:.4f}")
@@ -254,3 +268,17 @@ if __name__ == "__main__":
         # saving planes in numpy format for using in lshash3
         W = torch.load(f"{hasher_expt_root}/hyperplanes_{hplanes_id}.pkl").cpu().detach().numpy()
         np.savez_compressed(f"{hasher_expt_root}/weights.npz", *W)
+
+    if getattr(args, "run_lsh_eval", False):
+        cmd = f"python eval_lsh.py expt_id={experiment_id} hexpt_num={hasher_expt_num} device={DEVICE} m=10 L=30 hplanes=hyperplanes_{hplanes_id} kbits=[10,8,6,4,2,1] seed=69 save_expt_num={args.save_expt_num} skip_logging=True"
+        ret = os.system(cmd)
+        
+        if ret == 2:
+            print(f"LSH evaluation failed for {l1=}, {l2=}, {l3=}")
+        
+        perf = np.load(f"tmp/multi/tmp_{args.save_expt_num}.npy").tolist()
+        perf = [l1, l2, l3] + perf
+        np.save(f"tmp/multi/tmp_{args.save_expt_num}.npy", perf)
+
+        with open("tmp/lsh_multi_final.txt", "a+") as f:
+            f.write(f"{perf}\n")

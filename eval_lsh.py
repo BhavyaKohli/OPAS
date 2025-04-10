@@ -161,7 +161,15 @@ class LSH(object):
 
 if __name__ == "__main__":
     cli_args = OmegaConf.from_cli()
-    
+
+    try:
+        skip_logging = cli_args.skip_logging
+        def noop(*args, **kwargs):
+            pass
+        print = noop    # disable printing
+    except:
+        skip_logging = False
+
     expt_id = cli_args.expt_id
     hasher_expt_num = cli_args.hexpt_num
     hasher_expt_root = f"hashing/{expt_id}/{hasher_expt_num}/"
@@ -279,10 +287,11 @@ if __name__ == "__main__":
     )
     lsh.index(corpus_embedded)
 
+    randqueries = torch.randperm(len(lsh.q))[:100]
     num_matches, num_relevant = {k: [] for k in kbits}, {k: [] for k in kbits}
     ranked_output = {k: [] for k in kbits}
     MAP = {k: [] for k in kbits}
-    for i in tqdm(range(len(lsh.q[:100])), desc="Evaluating..."):
+    for i in tqdm(range(len(lsh.q[randqueries])), desc="Evaluating...", disable=skip_logging):
         matches, match_idxs, sims = lsh.query_multi_kbits(i, topk, kbits, distance_func="orig")
         for k in kbits:
             sims[k] = sorted(sims[k], reverse=True)
@@ -299,9 +308,11 @@ if __name__ == "__main__":
     MAP = {k: np.mean(MAP[k]) for k in kbits}
     # for k in kbits:
     #     print(f"{k}, MAP: {MAP[k]}, Mean matches: {np.mean(num_matches[k]):.2f}, Mean relevant: {np.mean(num_relevant[k]):.2f}")
-    print([i for j in [(MAP[k], np.mean(num_matches[k]), np.mean(num_relevant[k])) for k in kbits] for i in j])
-
-    import ipdb; ipdb.set_trace()
+    
+    ls = [i for j in [(MAP[k], np.mean(num_matches[k]), np.mean(num_relevant[k])) for k in kbits] for i in j]
+    np.save(f"tmp/multi/tmp_{args.save_expt_num}.npy", ls)
+    print(ls)
+    exit()
 
     with open(f"{hasher_expt_root}/lsh_perf.csv", "a+") as f:
         for k in kbits:
