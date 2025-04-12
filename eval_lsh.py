@@ -263,7 +263,10 @@ if __name__ == "__main__":
 
     ####### LSH ########
     with torch.no_grad():
-        corpus_embedded = hasher[1](corpus_embedded.to(DEVICE)).cpu()
+        corpus_embedded_out = []
+        for i in range(0,len(corpus_embedded),200):
+            corpus_embedded_out.append(hasher[1](corpus_embedded[i:i+200].to(DEVICE)).cpu())
+        corpus_embedded = torch.vstack(corpus_embedded_out)
         test_query_embedded = hasher[0](test_query_embedded.to(DEVICE)).cpu()
     
     topk = None
