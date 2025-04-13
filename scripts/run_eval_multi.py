@@ -31,9 +31,9 @@ if __name__ == "__main__":
             exit()
 
         try:
-            perf = np.load(f"tmp/multi/tmp_{args.save_expt_num}.npy").tolist()
+            perf = np.load(f"tmp/multi/tmp_{i}{i}.npy").tolist()
             perf = [l1, l2, l3] + perf
-            np.save(f"tmp/multi/tmp_{args.save_expt_num}.npy", perf)
+            np.save(f"tmp/multi/tmp_{i}{i}.npy", perf)
         except:
             with open("tmp/multi/fails.txt", "a") as f:
                 f.write(f"{i} {device} {l1} {l2} {l3} failed\n")
@@ -48,4 +48,4 @@ if __name__ == "__main__":
         combs[i] = [i, gpus[i % (len(gpus))]] + c
 
     with Pool(6*len(gpus)) as pool:
-        pool.starmap(run_expt, tqdm(combs, total=len(combs), desc="Running experiments..."))
+        pool.starmap(run_expt, tqdm(combs, total=len(combs), desc="Running experiments..."), chunksize=1)
