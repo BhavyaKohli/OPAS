@@ -55,7 +55,7 @@ class LSH(object):
     def hashall(self, tensor):
         # tensor: (n, d)
         tensor = torch.atleast_2d(tensor)
-        hashcodes = 0.5 * (torch.einsum("nmd,bd->nbm", self.planes, tensor.to(self.device)).sign() + 1)
+        hashcodes = 0.5 * (torch.einsum("nmd,bd->nbm", self.planes, tensor.to(self.device)).sign() + 1).cpu()
         return hashcodes.squeeze()
 
     def _query_single(self, query):

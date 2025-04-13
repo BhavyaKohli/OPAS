@@ -148,13 +148,19 @@ if __name__ == "__main__":
     val_dataset = LoadedDsetTrain(VAL_FILE)
     test_dataset = LoadedDset(TEST_FILE)
 
+    def _embed_c(c):
+        out = []
+        for i in range(0,len(c),200):
+            out.append(hasher[1](c[i:i+200].to(DEVICE)).cpu())
+        return torch.vstack(out)
+
     with torch.no_grad():
         train_dataset.q = hasher[0](train_dataset.q.to(DEVICE)).cpu()
-        train_dataset.c = hasher[1](train_dataset.c.to(DEVICE)).cpu()
+        train_dataset.c = _embed_c(train_dataset.c) #hasher[1](train_dataset.c.to(DEVICE)).cpu()
         val_dataset.q = hasher[0](val_dataset.q.to(DEVICE)).cpu()
-        val_dataset.c = hasher[1](val_dataset.c.to(DEVICE)).cpu()
+        val_dataset.c = _embed_c(val_dataset.c) #hasher[1](val_dataset.c.to(DEVICE)).cpu()
         test_dataset.q = hasher[0](test_dataset.q.to(DEVICE)).cpu()
-        test_dataset.c = hasher[1](test_dataset.c.to(DEVICE)).cpu()
+        test_dataset.c = _embed_c(test_dataset.c) #hasher[1](test_dataset.c.to(DEVICE)).cpu()
 
     W = nn.Parameter(torch.randn(args.nplanes, args.nbits, train_dataset.q.shape[-1], device=DEVICE), requires_grad=True)
     optimizer = torch.optim.Adam([W], lr=args.lr)
