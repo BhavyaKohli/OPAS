@@ -190,19 +190,15 @@ if __name__ == "__main__":
     saved_gt_path = f"hashing/{expt_id}_embeds_gt.pkl"
 
     if os.path.exists(saved_gt_path) and getattr(args, "skip_gt", True):
+        dataset = args.dataset
         savedict = torch.load(saved_gt_path)
         corpus_embedded = savedict["corpus"].cpu()
         labels = savedict["labels"].cpu()
         global_scores = savedict["scores"].cpu()
         test_query_embedded = savedict["queries"].cpu()
         print("Loaded ground truth")
-    else:
-        dataset = args.dataset
-        DATA_ROOT = f"final_data/{dataset}"
-        TRAIN_FILE = f"{DATA_ROOT}/dataset_train.hdf5"
-        VAL_FILE = f"{DATA_ROOT}/dataset_val.hdf5"
-        TEST_FILE = f"{DATA_ROOT}/dataset_test.hdf5"
-        
+
+    else:        
         model, scoremodel, embed_model, preembed_model, aggregator = load_models(name="best", expt_root=expt_root, device=DEVICE, args=args)
         model.eval(), scoremodel.eval(), embed_model.eval(), preembed_model.eval()
         if aggregator is not None:
@@ -313,7 +309,8 @@ if __name__ == "__main__":
     #     print(f"{k}, MAP: {MAP[k]}, Mean matches: {np.mean(num_matches[k]):.2f}, Mean relevant: {np.mean(num_relevant[k]):.2f}")
     
     ls = [i for j in [(MAP[k], np.mean(num_matches[k]), np.mean(num_relevant[k])) for k in kbits] for i in j]
-    np.save(f"tmp/multi/tmp_{args.save_expt_num}.npy", ls)
+    os.makedirs(f"tmp/multi_{dataset}", exist_ok=True)
+    np.save(f"tmp/multi_{dataset}/tmp_{args.save_expt_num}.npy", ls)
     print(ls)
     exit()
 
