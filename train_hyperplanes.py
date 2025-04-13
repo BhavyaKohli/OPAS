@@ -271,15 +271,15 @@ if __name__ == "__main__":
         np.savez_compressed(f"{hasher_expt_root}/weights.npz", *W)
 
     if getattr(args, "run_lsh_eval", False):
-        cmd = f"python eval_lsh.py expt_id={experiment_id} hexpt_num={hasher_expt_num} device={DEVICE[-1]} m=10 L=30 hplanes=hyperplanes_{hplanes_id} kbits=[10,8,6,4,2,1] seed=69 save_expt_num={args.save_expt_num} skip_logging=True"
+        cmd = f"python eval_lsh.py expt_id={experiment_id} hexpt_num={hasher_expt_num} device={DEVICE[-1]} m=10 L=30 hplanes=hyperplanes_{hplanes_id} kbits=[10,8,7,6,5,4,2,1] seed=69 save_expt_num={args.save_expt_num} skip_logging=True"
         ret = os.system(cmd)
         
         if ret == 2:
             print(f"LSH evaluation failed for {l1=}, {l2=}, {l3=}")
         
-        perf = np.load(f"tmp/multi/tmp_{args.save_expt_num}.npy").tolist()
+        perf = np.load(f"tmp/multi_{dataset}/tmp_{args.save_expt_num}.npy").tolist()
         perf = [l1, l2, l3] + perf
-        np.save(f"tmp/multi/tmp_{args.save_expt_num}.npy", perf)
+        np.save(f"tmp/multi_{dataset}/tmp_{args.save_expt_num}.npy", perf)
         try:
             with open("tmp/lsh_multi_final.txt", "a+") as f:
                 f.write(f"{perf}\n")
