@@ -16,8 +16,6 @@ if __name__ == "__main__":
     logger.remove(0)
     logger.add("tmp/lsh_multi.log", level="INFO", format="{time:D-MM-YYYY HH:mm:ss} | {level} | {message}")
 
-    device = 0
-
     l1s = [1e-4, 1e-3, 1e-2, 5e-2]
     l2s = [1e-2, 5e-2, 1e-1, 5e-1, 1]
     l3s = [1e-4, 1e-3]
