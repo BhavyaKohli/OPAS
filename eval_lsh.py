@@ -166,9 +166,10 @@ if __name__ == "__main__":
         skip_logging = cli_args.skip_logging
         def noop(*args, **kwargs):
             pass
-        print = noop    # disable printing
+        if skip_logging:
+            print = noop    # disable printing
     except:
-        skip_logging = False
+        pass
 
     expt_id = cli_args.expt_id
     hasher_expt_num = cli_args.hexpt_num

@@ -23,29 +23,31 @@ if __name__ == "__main__":
     l3s = [1e-4, 1e-3]
     combs = [[x, y, z] for x in l1s for y in l2s for z in l3s]
 
-    def run_expt(i, device, l1, l2, l3):
-        cmd = f"python eval_lsh.py expt_id={expt_id} hexpt_num={hexpt_num} device={device} m=10 L=30 hplanes=hyperplanes_{i} kbits=[10,8,7,6,5,4,2,1] seed=69 save_expt_num={i}{i} skip_logging=True"
-        ret = os.system(cmd)
-        if ret == 2:
-            print("Interrupting...")
-            exit()
-
-        try:
-            perf = np.load(f"tmp/multi/tmp_{i}{i}.npy").tolist()
-            perf = [l1, l2, l3] + perf
-            np.save(f"tmp/multi/tmp_{i}{i}.npy", perf)
-        except:
-            with open("tmp/multi/fails.txt", "a") as f:
-                f.write(f"{i} {device} {l1} {l2} {l3} failed\n")
-                
-        try:
-            with open("tmp/lsh_multi_final.txt", "a+") as f:
-                f.write(f"{perf}\n")
-        except:
-            pass
-
     for i, c in enumerate(combs):
         combs[i] = [i, gpus[i % (len(gpus))]] + c
 
-    with Pool(6*len(gpus)) as pool:
-        pool.starmap(run_expt, tqdm(combs, total=len(combs), desc="Running experiments..."), chunksize=1)
+    with tqdm(total=len(combs), desc="Running experiments...") as pbar:
+        def run_expt(i, device, l1, l2, l3):
+            cmd = f"python eval_lsh.py expt_id={expt_id} hexpt_num={hexpt_num} device={device} m=10 L=30 hplanes=hyperplanes_{i} kbits=[10,8,7,6,5,4,2,1] seed=69 save_expt_num={i}{i} skip_logging=True"
+            ret = os.system(cmd)
+            if ret == 2:
+                print("Interrupting...")
+                exit()
+
+            try:
+                perf = np.load(f"tmp/multi/tmp_{i}{i}.npy").tolist()
+                perf = [l1, l2, l3] + perf
+                np.save(f"tmp/multi/tmp_{i}{i}.npy", perf)
+            except:
+                with open("tmp/multi/fails.txt", "a") as f:
+                    f.write(f"{i} {device} {l1} {l2} {l3} failed\n")
+                    
+            try:
+                with open(f"tmp/lsh_multi_final_{expt_id[0]}.txt", "a+") as f:
+                    f.write(f"{perf}\n")
+            except:
+                pass
+            pbar.update(1)
+
+        with Pool(6*len(gpus)) as pool:
+            pool.starmap(run_expt, combs, chunksize=1)
