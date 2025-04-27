@@ -25,9 +25,8 @@ def compute_metrics(dataset, model, scoremodel, embed_model, preembed_model, ima
         # q is (b, m, xoutdim)
         if aggregator is None:
             qct = torch.einsum("bmd,Nnd->bNmn", q, C)
-            if isinstance(model, LamModel):
+            if isinstance(model, LamModel) or isinstance(model, DummyLamModel):
                 model_inputs = stagger_and_concat(qct, num_stagger=stagger) # bNsmn  s = num_stagger+1
-
                 lambdas = torch.stack([model(x) for x in model_inputs])
                 # bNm1
             else:
@@ -84,11 +83,13 @@ if __name__ == "__main__":
     parser.add_argument("--dataset", type=str, required=True, help="name of dataset, stored in `final_data/`")
     parser.add_argument("--device", type=str, default=-1, help="gpu id to run on,  pass -1 to run on cpu")
     parser.add_argument("--old", action="store_true", help="use old model checkpoint folder")
+    parser.add_argument("--fix_lambdas", default=None, help="fix lambdas to this value, do not use LamModel")
     args = parser.parse_args()
 
     experiment_id = args.expt_id
     folder = "models" if not args.old else "models_old"
     expt_root = f"{folder}/{experiment_id}/"
+    fix_lambdas = args.fix_lambdas
 
     dataset = args.dataset
     DEVICE = f"cuda:{args.device}" if torch.cuda.is_available() and args.device != -1 else "cpu"
@@ -127,6 +128,12 @@ if __name__ == "__main__":
     M = test_dataset.q[0].shape[0]
     N = test_dataset.c[0].shape[0]
     ####################
+    if fix_lambdas is not None:
+        fix_lambdas = float(fix_lambdas)
+        model = DummyLamModel(M,value=fix_lambdas)
+        model.to(DEVICE)
+        model.eval()
+        print(f"Using fixed lambdas: {fix_lambdas}")
 
     A_mat, a_vec, Rm_mat = get_opas_constants(M, N, DEVICE)
 
