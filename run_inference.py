@@ -8,7 +8,7 @@ from opas.models.model_utils import load_models, get_image_embed_model
 @torch.no_grad()
 def compute_metrics(dataset, model, scoremodel, embed_model, preembed_model, image_embed_model=None, stagger=2, verbose=False, aggregator=None):
 
-    loader = dataset.get_dataloader(batch_size=100, shuffle=True)
+    loader = dataset.get_dataloader(batch_size=50, shuffle=True)
 
     C = embed_full_corpus(dataset, embed_model, preembed_model, image_embed_model=image_embed_model, aggregator=aggregator)
     # C is (N, n, xoutdim)
