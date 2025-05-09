@@ -13,9 +13,9 @@ __pycache__/
 
 !README.md
 
-nb_*
 tmp/
 
+nb*
 *.pkl
 
 *gt/

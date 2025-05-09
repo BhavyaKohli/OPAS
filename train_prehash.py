@@ -302,6 +302,8 @@ if __name__ == "__main__":
         for n, (q, l, gtl) in enumerate(inner_pbar):
             q = q.to(DEVICE)
             gtl = gtl.to(DEVICE)
+            if "cifar" in dataset or "speech" in dataset:
+                gtl = F.sigmoid(gtl-0.2)
             c = train_dataset.c.to(DEVICE)
             # q: (batch_size, M, indim)
             # c: (len(train_dataset), N, indim)

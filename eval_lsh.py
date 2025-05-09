@@ -55,7 +55,7 @@ class LSH(object):
     def hashall(self, tensor):
         # tensor: (n, d)
         tensor = torch.atleast_2d(tensor)
-        hashcodes = 0.5 * (torch.einsum("nmd,bd->nbm", self.planes, tensor.to(self.device)).sign() + 1)
+        hashcodes = 0.5 * (torch.einsum("nmd,bd->nbm", self.planes, tensor.to(self.device)).sign() + 1).cpu()
         return hashcodes.squeeze()
 
     def _query_single(self, query):
@@ -161,7 +161,16 @@ class LSH(object):
 
 if __name__ == "__main__":
     cli_args = OmegaConf.from_cli()
-    
+
+    try:
+        skip_logging = cli_args.skip_logging
+        def noop(*args, **kwargs):
+            pass
+        if skip_logging:
+            print = noop    # disable printing
+    except:
+        pass
+
     expt_id = cli_args.expt_id
     hasher_expt_num = cli_args.hexpt_num
     hasher_expt_root = f"hashing/{expt_id}/{hasher_expt_num}/"
@@ -182,19 +191,15 @@ if __name__ == "__main__":
     saved_gt_path = f"hashing/{expt_id}_embeds_gt.pkl"
 
     if os.path.exists(saved_gt_path) and getattr(args, "skip_gt", True):
+        dataset = args.dataset
         savedict = torch.load(saved_gt_path)
         corpus_embedded = savedict["corpus"].cpu()
         labels = savedict["labels"].cpu()
         global_scores = savedict["scores"].cpu()
         test_query_embedded = savedict["queries"].cpu()
         print("Loaded ground truth")
-    else:
-        dataset = args.dataset
-        DATA_ROOT = f"final_data/{dataset}"
-        TRAIN_FILE = f"{DATA_ROOT}/dataset_train.hdf5"
-        VAL_FILE = f"{DATA_ROOT}/dataset_val.hdf5"
-        TEST_FILE = f"{DATA_ROOT}/dataset_test.hdf5"
-        
+
+    else:        
         model, scoremodel, embed_model, preembed_model, aggregator = load_models(name="best", expt_root=expt_root, device=DEVICE, args=args)
         model.eval(), scoremodel.eval(), embed_model.eval(), preembed_model.eval()
         if aggregator is not None:
@@ -255,7 +260,10 @@ if __name__ == "__main__":
 
     ####### LSH ########
     with torch.no_grad():
-        corpus_embedded = hasher[1](corpus_embedded.to(DEVICE)).cpu()
+        corpus_embedded_out = []
+        for i in range(0,len(corpus_embedded),200):
+            corpus_embedded_out.append(hasher[1](corpus_embedded[i:i+200].to(DEVICE)).cpu())
+        corpus_embedded = torch.vstack(corpus_embedded_out)
         test_query_embedded = hasher[0](test_query_embedded.to(DEVICE)).cpu()
     
     topk = None
@@ -279,10 +287,11 @@ if __name__ == "__main__":
     )
     lsh.index(corpus_embedded)
 
+    randqueries = torch.randperm(len(lsh.q))[:100]
     num_matches, num_relevant = {k: [] for k in kbits}, {k: [] for k in kbits}
     ranked_output = {k: [] for k in kbits}
     MAP = {k: [] for k in kbits}
-    for i in tqdm(range(len(lsh.q[:100])), desc="Evaluating..."):
+    for i in tqdm(range(len(lsh.q[randqueries])), desc="Evaluating...", disable=skip_logging):
         matches, match_idxs, sims = lsh.query_multi_kbits(i, topk, kbits, distance_func="orig")
         for k in kbits:
             sims[k] = sorted(sims[k], reverse=True)
@@ -297,10 +306,14 @@ if __name__ == "__main__":
             num_matches[k].append(len(matches[k]))
             num_relevant[k].append(true_labels.sum().item())
     MAP = {k: np.mean(MAP[k]) for k in kbits}
-    for k in kbits:
-        print(f"{k}, MAP: {MAP[k]}, Mean matches: {np.mean(num_matches[k]):.2f}, Mean relevant: {np.mean(num_relevant[k]):.2f}")
-
-    import ipdb; ipdb.set_trace()
+    # for k in kbits:
+    #     print(f"{k}, MAP: {MAP[k]}, Mean matches: {np.mean(num_matches[k]):.2f}, Mean relevant: {np.mean(num_relevant[k]):.2f}")
+    
+    ls = [i for j in [(MAP[k], np.mean(num_matches[k]), np.mean(num_relevant[k])) for k in kbits] for i in j]
+    os.makedirs(f"tmp/multi_{dataset}", exist_ok=True)
+    np.save(f"tmp/multi_{dataset}/tmp_{args.save_expt_num}.npy", ls)
+    print(ls)
+    exit()
 
     with open(f"{hasher_expt_root}/lsh_perf.csv", "a+") as f:
         for k in kbits:

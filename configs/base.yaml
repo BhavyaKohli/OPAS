@@ -54,7 +54,7 @@ use_linear_lammodel: False
 
 # new experiments
 no_lammodel: False
-no_lamrelu: False
+no_lamrelu: True          # important
 pretrain_embedding: False
 pretrain_budget: 0.25
 pretrain_epochs: 30

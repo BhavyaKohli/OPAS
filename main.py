@@ -289,6 +289,17 @@ class LRLModel(nn.Module):
         return self.lrl(x.flatten(start_dim=1))
 
 
+class DummyLamModel(nn.Module):
+    def __init__(self, M, value=1):
+        super().__init__()
+        self.M = M
+        self.value = value
+        self.dummy_param = nn.Parameter(torch.empty(1), requires_grad=True)
+        
+    def forward(self, x):
+        return self.value * torch.ones((x.shape[0], self.M, 1), device=x.device)
+
+
 if __name__ == '__main__':
     cli_conf = OmegaConf.from_cli()
     dataset = cli_conf.dataset
@@ -603,6 +614,8 @@ if __name__ == '__main__':
     model = LamModel(M, N, stagger).to(DEVICE)
     if args.use_linear_lammodel:
         model = nn.Sequential(nn.Linear((M+N)*args.xoutdim, M), nn.Sigmoid()).to(DEVICE)
+    if getattr(args, "fix_lambdas", None) is not None:
+        model = DummyLamModel(M, value=args.fix_lambdas).to(DEVICE)
 
     optimizer = torch.optim.Adam(model.parameters(), lr=lr, amsgrad=True)
     sc_optimizer = torch.optim.Adam(scoremodel.parameters(), lr=lr, amsgrad=True, weight_decay=1e-2)
@@ -792,14 +805,17 @@ if __name__ == '__main__':
                 elif args.deepset_mode == "cosine":     # 3
                     netscore = 0.5 * (F.cosine_similarity(q, c, dim=-1) + 1)
 
-            pos_score = netscore[torch.where(l==1)]
-            neg_score = netscore[torch.where(l==0)]
-            
-            neg_minus_pos = (neg_score.unsqueeze(0) - pos_score.unsqueeze(1)).reshape(-1)   # dim(pos_score) * dim(neg_score)
+            if not getattr(args, "train_with_labels", False):
+                pos_score = netscore[torch.where(l==1)]
+                neg_score = netscore[torch.where(l==0)]
+                
+                neg_minus_pos = (neg_score.unsqueeze(0) - pos_score.unsqueeze(1)).reshape(-1)   # dim(pos_score) * dim(neg_score)
 
-            loss = F.relu(delta + neg_minus_pos).mean() 
-            if gapwt > 0 and not DEEPSET:
-                loss += gapwt * F.relu(A_mat @ Rm_mat @ P @ a_vec - b1).mean()
+                loss = F.relu(delta + neg_minus_pos).mean() 
+                if gapwt > 0 and not DEEPSET:
+                    loss += gapwt * F.relu(A_mat @ Rm_mat @ P @ a_vec - b1).mean()
+            else:
+                loss = F.binary_cross_entropy(netscore, l.to(DEVICE), reduction="mean")
 
             optimizer.zero_grad()
             sc_optimizer.zero_grad()
