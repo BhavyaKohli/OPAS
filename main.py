@@ -805,14 +805,17 @@ if __name__ == '__main__':
                 elif args.deepset_mode == "cosine":     # 3
                     netscore = 0.5 * (F.cosine_similarity(q, c, dim=-1) + 1)
 
-            pos_score = netscore[torch.where(l==1)]
-            neg_score = netscore[torch.where(l==0)]
-            
-            neg_minus_pos = (neg_score.unsqueeze(0) - pos_score.unsqueeze(1)).reshape(-1)   # dim(pos_score) * dim(neg_score)
+            if not getattr(args, "train_with_labels", False):
+                pos_score = netscore[torch.where(l==1)]
+                neg_score = netscore[torch.where(l==0)]
+                
+                neg_minus_pos = (neg_score.unsqueeze(0) - pos_score.unsqueeze(1)).reshape(-1)   # dim(pos_score) * dim(neg_score)
 
-            loss = F.relu(delta + neg_minus_pos).mean() 
-            if gapwt > 0 and not DEEPSET:
-                loss += gapwt * F.relu(A_mat @ Rm_mat @ P @ a_vec - b1).mean()
+                loss = F.relu(delta + neg_minus_pos).mean() 
+                if gapwt > 0 and not DEEPSET:
+                    loss += gapwt * F.relu(A_mat @ Rm_mat @ P @ a_vec - b1).mean()
+            else:
+                loss = F.binary_cross_entropy(netscore, l.to(DEVICE), reduction="mean")
 
             optimizer.zero_grad()
             sc_optimizer.zero_grad()
