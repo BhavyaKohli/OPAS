@@ -1,0 +1,16 @@
+seed: 42
+reproducible: True
+hash_margin: 0.5
+nepochs: 4000
+lr: 1e-3
+loss_type: "mse"
+batch_size: 128
+scheduler: True
+
+# defaults
+share_hasher: True
+sample_scores: False
+total_exploration: None
+pos_samps: 10
+debug: False
+wandb: False
