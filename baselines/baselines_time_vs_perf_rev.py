@@ -23,7 +23,8 @@ class DatasetTensors:
         self.q = tensors["q"]
         self.l = tensors["l"]
         self.c = tensors["c"].numpy()
- 
+        print(self.q.shape, self.l.shape, self.c.shape)
+
 
 def normalize(*args):
     ret = []
@@ -116,10 +117,10 @@ def get_run_stats(ts, num_runs, num_c, num_q, map, mrr, hitsk):
 
 if __name__ == "__main__":
     logging.info = lambda x: None
-    config = OmegaConf.load("configs/main.config")
+    config = OmegaConf.load("configs/main_rev.config")
 
     parser = argparse.ArgumentParser('Inference Time Comparisons')
-    parser.add_argument("--dataset", type=str, help="dataset", choices=["audio", "speech", "cifar", "lsun"])
+    parser.add_argument("--dataset", type=str, help="dataset")#, choices=["audio", "speech", "cifar", "lsun"])
     parser.add_argument("--debug", action='store_true', help="debug mode")
     args = parser.parse_args()
 
@@ -173,7 +174,7 @@ if __name__ == "__main__":
 
             start = time()
             for i, query in enumerate(method_q):
-                for j, corpus in enumerate(method_c):
+                for j, corpus in enumerate(tqdm(method_c, desc=f"Query {i}", leave=False)):
                     sim[i,j] = -distance_function(corpus.cpu().numpy(), query.cpu().numpy())
             map_, mrr_, hitsk_ = compute_map_mrr(sim, method_l, k=k)
             stop = time()
@@ -191,7 +192,7 @@ if __name__ == "__main__":
     with open(f"../plots_and_figures/data/times_{args.dataset}.log", "a+") as main_logfile:
         print(f"Dataset: {args.dataset}", file=main_logfile)
 
-        SKIP_LIST = [5, 10, 50, 100, 200, 500, 1000][:1]#[::-1]       # inputs: 4000 (audio), 3072 (cifar)
+        SKIP_LIST = [1, 10, 50, 100, 200, 500, 1000][:1]#[::-1]       # inputs: 4000 (audio), 3072 (cifar)
         if args.dataset == "lsun":
             # original = 196_608
             SKIP_LIST = [500, 1000, 15000, 25000, 30000, 40000, 50000, 90000][::-1]
@@ -214,7 +215,8 @@ if __name__ == "__main__":
                 sharp_num_q = int(config['sharp']['num_q'])
 
                 run_baseline("SHARP", sharp_sdtw_div, q, test_dataset_c, sharp_num_c, sharp_num_runs, sharp_num_q, SKIP)
-            
+                print(GLOBAL_TIMES, file=main_logfile)
+
             if DEBUG:
                 print(GLOBAL_TIMES); raise
 
@@ -233,6 +235,7 @@ if __name__ == "__main__":
                 dtw_func = lambda c, q: dtw(c, q, dist=cs)[0]
 
                 run_baseline("FASTDTW", dtw_func, q, test_dataset_c, dtw_num_c, dtw_num_runs, dtw_num_q, SKIP)
+                print(GLOBAL_TIMES, file=main_logfile)
 
             #######################################################
             ##################### SDTW ############################
@@ -248,6 +251,7 @@ if __name__ == "__main__":
                 sdtw_num_q = int(config['sdtw']['num_q'])
 
                 run_baseline("SDTW", sdtw_div, q, test_dataset_c, sdtw_num_c, sdtw_num_runs, sdtw_num_q, SKIP)
+                print(GLOBAL_TIMES, file=main_logfile)
 
             #######################################################
             ################## MASS ###############################

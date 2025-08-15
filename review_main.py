@@ -30,7 +30,16 @@ from transformers import get_linear_schedule_with_warmup, AdamW
 import torchaudio.transforms as T
 
 
-tqdm = partial(tqdm, ncols=150)
+tqdm = partial(tqdm, ncols=100)
+
+
+class DummyScoreModel(nn.Module):
+    def __init__(self, indim=2, outdim=1) :
+        super().__init__()
+        self.weight = nn.Parameter(torch.randn(indim, outdim))
+    def forward(self, x) :
+        logits = x.sum(dim=-1)
+        return nn.Sigmoid()(logits)
 
 
 class Attention_Layer(nn.Module):
@@ -311,8 +320,6 @@ if __name__ == '__main__':
         spec_conf = OmegaConf.load("configs/cifar.yaml")
     elif "lsun" in dataset:
         spec_conf = OmegaConf.load("configs/lsun.yaml")
-    elif "text" in dataset:
-        spec_conf = OmegaConf.load("configs/text.yaml")
     else:
         raise NotImplementedError(f"Check dataset name")
     
@@ -340,8 +347,6 @@ if __name__ == '__main__':
         args.speech = True
         args.human = True
         experiment_id = f"S{experiment_id}"
-    elif "text" in args.dataset:
-        experiment_id = f"T{experiment_id}"
     elif "video" in args.dataset:
         args.video = True
         experiment_id = f"V{experiment_id}"
@@ -515,8 +520,11 @@ if __name__ == '__main__':
 
     M, N = PARAMS.M, PARAMS.N
 
-    scoremodel = ScoreModel().to(DEVICE)
-    
+    if getattr(args, "dummy_scoremodel", False):
+        scoremodel = DummyScoreModel().to(DEVICE)
+    else:
+        scoremodel = ScoreModel().to(DEVICE)
+
     tokenize_transform = lambda x: tokenize(x, args)[0]
     d_model = 256
     lin_transform = nn.Sequential(
@@ -895,7 +903,7 @@ if __name__ == '__main__':
     if not args.debug: save_models(model, scoremodel, embed_model, preembed_model, aggregator, final=True)
 
     if not args.train_with_orig:
-        cmd = f"python run_inference.py --dataset {args.dataset} --expt_id {experiment_id} --device {DEVICE[-1]}"
+        cmd = f"python review_run_inference.py --dataset {args.dataset} --expt_id {experiment_id} --device {DEVICE[-1]}"
         ret = os.system(cmd)
         if ret != 0:
             print(f"Error in running inference script")
