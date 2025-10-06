@@ -24,7 +24,7 @@ preembed: "tokenize"
 
 # base lr, epochs
 lr: 5e-4
-nepochs: 30
+nepochs: 50
 device: ???
 batch_size: 200
 
@@ -54,7 +54,7 @@ use_linear_lammodel: False
 
 # new experiments
 no_lammodel: False
-no_lamrelu: True          # important
+no_lamrelu: False           # use relu in s_lambda, to equalize cases where ordering criterion is met
 pretrain_embedding: False
 pretrain_budget: 0.25
 pretrain_epochs: 30

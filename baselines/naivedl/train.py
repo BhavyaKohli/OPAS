@@ -12,11 +12,6 @@ from torch.utils.data import Dataset, DataLoader
 from transformers import get_linear_schedule_with_warmup, AdamW
 
 import sys
-sys.path.append("../neuts/")
-
-import tools.sampling_methods as sm
-from geo_rnns.wrloss import WeightedRankingLoss
-
 
 from torch.nn import Module
 

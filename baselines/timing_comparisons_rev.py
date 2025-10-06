@@ -10,7 +10,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 sys.path.append(os.path.abspath(os.path.pardir))
-from main import *
+from review_main_long_seq import *
 
 from time import time
 from argparse import Namespace as AttributeDict
@@ -71,28 +71,34 @@ def get_batch_scores(q, l, C, model, scoremodel, embed_model, preembed_model, im
     """
     q = prepare_batch(q, embed_model, preembed_model, image_embed_model=image_embed_model, noise_override=noise_override)
 
-    if aggregator is None:
-        qct = torch.einsum("bmd,Nnd->bNmn", q, C)
-        model_inputs = stagger_and_concat(qct, num_stagger=stagger) # bNsmn  s = num_stagger+1
+    inner_score = []
+    for cmini in range(0,len(C),50):
+        C_ = C[cmini:cmini+50]
+        
+        if aggregator is None:
+            qct = torch.einsum("bmd,Nnd->bNmn", q, C_)
+            model_inputs = stagger_and_concat(qct, num_stagger=stagger) # bNsmn  s = num_stagger+1
 
-        lambdas = torch.stack([model(x) for x in model_inputs])
-        # bNm1
+            lambdas = torch.stack([model(x) for x in model_inputs])
+            # bNm1
 
-        F_mat = Rm_mat.T @ (2*qct + (a_vec @ lambdas.transpose(2,3) @ A_mat).transpose(2,3))
+            F_mat = Rm_mat.T @ (2*qct + (a_vec @ lambdas.transpose(2,3) @ A_mat).transpose(2,3))
 
-        P = gumbel_sinkhorn(F_mat, CFG.tau, CFG.n_sink_iter, noise=False)
+            P = gumbel_sinkhorn(F_mat, CFG.tau, CFG.n_sink_iter, noise=False)
 
-        RmPC = Rm_mat @ P @ C.squeeze(-1)
+            RmPC = Rm_mat @ P @ C_.squeeze(-1)
 
-        lamscore = lamwt * (lambdas.transpose(2,3) @ F.relu(b-A_mat @ Rm_mat @ P @ a_vec)).squeeze()
-        normscore = torch.norm(q.unsqueeze(1) - RmPC, dim=[-1,-2])
+            lamscore = lamwt * (lambdas.transpose(2,3) @ F.relu(b-A_mat @ Rm_mat @ P @ a_vec)).squeeze()
+            normscore = torch.norm(q.unsqueeze(1) - RmPC, dim=[-1,-2])
 
-        allscores = torch.stack([lamscore, normscore], dim=2)
-        netscore = 2*scoremodel(-allscores).squeeze()      # b
+            allscores = torch.stack([lamscore, normscore], dim=2)
+            netscore = 2*scoremodel(-allscores).squeeze()      # b
 
-    else:
-        q = aggregator(q)
-        netscore = 2 * F.sigmoid(-F.relu(q.unsqueeze(1) - C.unsqueeze(0)).sum(dim=-1))
+        else:
+            q = aggregator(q)
+            netscore = 2 * F.sigmoid(-F.relu(q.unsqueeze(1) - C_.unsqueeze(0)).sum(dim=-1))
+        inner_score.append(netscore)
+    netscore = torch.cat(inner_score, dim=-1)        
 
     return netscore.to('cpu'), l.to('cpu')
 
@@ -152,7 +158,7 @@ if __name__ == "__main__":
         format="%(levelname)s (%(asctime)s): %(message)s",
         datefmt="%d/%m/%Y %I:%M:%S %p"
     )
-    config = OmegaConf.load("configs/main.config")
+    config = OmegaConf.load("configs/main_rev.config")
 
     parser = argparse.ArgumentParser('Inference Time Comparisons')
     parser.add_argument("--expt_id", type=str, help="Experiment ID")
@@ -228,13 +234,15 @@ if __name__ == "__main__":
     lamwt = args.lamwt    # loss coefficient for negative gap penalty
     gapwt = args.gapwt       # loss coefficient for positive gap penalty
     noise = args.noise
-    M = 6
-    N = 20
+    M = test_dataset.q.shape[-2]
+    N = test_dataset.c.shape[-2]
     ####################
 
     A_mat, a_vec, Rm_mat = get_opas_constants(M, N, DEVICE)
+    a_vec = torch.arange(N).reshape(a_vec.shape).float().to(DEVICE) # for long sequences, cant use exponentiation
 
-    CFG = AttributeDict(tau=1, n_sink_iter=20, n_samples=1)
+
+    CFG = AttributeDict(tau=1, n_sink_iter=args.n_sink_iter, n_samples=1)
 
     # inference times (and hparams) for all experiments stored for comparisons
     GLOBAL_TIMES = AttributeDict()
@@ -256,8 +264,6 @@ if __name__ == "__main__":
     logging.info(f"Corpus embedding cost for {len(test_dataset.c)} corpus items (one-time cost): {mu:.4f}±{sig:.4f} s (averaged over {num_runs} runs)")
 
     logging.info("\nRunning OPAS (GPU)")
-
-    A_mat, a_vec, Rm_mat = get_opas_constants(M, N, DEVICE)
 
     num_c = len(test_dataset.c)
     num_q = int(config['opas_gpu']['num_q'])
@@ -294,6 +300,7 @@ if __name__ == "__main__":
         if aggregator is not None:
             aggregator = aggregator.to(testdevice)
         A_mat, a_vec, Rm_mat = get_opas_constants(M, N, testdevice)
+        a_vec = torch.arange(N).reshape(a_vec.shape).float().to(testdevice) # for long sequences, cant use exponentiation
 
         ts = []
         map, mrr = [], []

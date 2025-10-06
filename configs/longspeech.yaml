@@ -1,0 +1,8 @@
+batch_size: 400
+delta: 0.3
+
+xoutdim: 256
+xlr: 5e-6
+xff: 512
+
+neg_expl: 400

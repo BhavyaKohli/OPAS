@@ -29,9 +29,9 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     DEVICE = f"cuda:{args.device}" if torch.cuda.is_available() and args.device != -1 else "cpu"
-    LSUN_ROOT = "data/lsun_gt/"
-    CIFAR_ROOT = "data/cifar_gt/"
-    IMAGENET_ROOT = "data/imagenet_gt/"
+    LSUN_ROOT = "data/image_sequence/lsun_gt/"
+    CIFAR_ROOT = "data/image_sequence/cifar_gt/"
+    IMAGENET_ROOT = "data/image_sequence/imagenet_gt/"
 
     # Create model
     if args.dataset_name == "CIFAR":
