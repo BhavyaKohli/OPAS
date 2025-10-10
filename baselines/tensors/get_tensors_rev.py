@@ -6,7 +6,7 @@ if __name__ == "__main__":
     for dataset in ['audio_500', 'speech', 'cifar', 'lsun'][:1]:
         try:
             print(f"Getting {dataset}")
-            TEST_FILE = f"../../final_data_rev/{dataset}/dataset_test.hdf5"
+            TEST_FILE = f"../../final_data/{dataset}/dataset_test.hdf5"
             if dataset in ['cifar', 'lsun']:
                 TEST_FILE = TEST_FILE.replace(".hdf5", "_orig.hdf5")
             test_dataset = PairDatasetTest(TEST_FILE)

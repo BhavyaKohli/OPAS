@@ -82,7 +82,10 @@ The directory structure after downloading the datasets and model files should be
 ├── ablations.sh
 ├── sanity_eval.sh
 ├── main.py
+├── main_long_seq.py                        # use for long sequence datasets (N>=50)
+├── main_direct_score.py
 ├── main_early.py
+├── main_old.py                             # legacy script (small changes with current version)
 ├── requirements.txt
 ├── run_eval_multi.py
 ├── run_inference.py
@@ -114,6 +117,9 @@ python main.py dataset=cifar-large device=$device
 python main.py dataset=lsun device=$device
 ```
 
+### note: alternate training scripts
+The scripts `main_direct_score.py` and `main_long_seq.py` are essentially the same script as `main.py`, with some special modifications for their resp. use cases. The direct score ablation discussed in Appendix L.7 uses the former, and long sequence datasets with N>=50 use the latter. If there is an attempt to run `main.py` with a long sequence dataset, an error will be raised and the script will abort. 
+
 ## evaluation
 For a trained model with experiment id `<expt_id>`, run only evaluation using
 
@@ -121,7 +127,9 @@ For a trained model with experiment id `<expt_id>`, run only evaluation using
 python run_inference.py --expt_id <expt_id> --device $device --dataset $dataset
 ```
 
-For cross-task results, simply change `$dataset` to a different dataset (assuming embedding dimensions, d_SR, etc are as described in the paper) at the time of running this command.
+For cross-task results, simply change `$dataset` to a different dataset (assuming embedding dimensions, $d_{SR}$, etc are as described in the paper) at the time of running this command.
+
+Note: there is a unique `run_inference_long_seq.py` as a companion script to `main_long_seq.py`. There is no companion inference script for `main_direct_score.py`. Please refer to the logfiles for those experiments to check test set metrics.
 
 ## ablations
 Refer to script `ablations.sh` for commands used to run the reported ablation studies.

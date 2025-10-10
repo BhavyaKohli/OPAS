@@ -129,7 +129,7 @@ if __name__ == "__main__":
 
     print(f"normscore weight: {nwt:.4f}, lamscore weight: {lamwt:.4f}")
     
-    DATA_ROOT = f"final_data_rev/{dataset}"
+    DATA_ROOT = f"final_data/{dataset}"
     TEST_FILE = f"{DATA_ROOT}/dataset_test.hdf5"
 
     image_embed_model, TEST_FILE = get_image_embed_model(dataset, [TEST_FILE], device=DEVICE)

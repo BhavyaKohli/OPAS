@@ -405,7 +405,7 @@ if __name__ == '__main__':
         with open(f"{EXPT_ROOT}/config.yaml", "w") as f:
             OmegaConf.save(main_conf, f)
 
-    DATA_ROOT = f"final_data_rev/{args.dataset}"
+    DATA_ROOT = f"final_data/{args.dataset}"
 
     TRAIN_FILE = f"{DATA_ROOT}/dataset_train.hdf5"
     TEST_FILE = f"{DATA_ROOT}/dataset_test.hdf5"
@@ -892,7 +892,7 @@ if __name__ == '__main__':
     if not args.debug: save_models(model, scoremodel, embed_model, preembed_model, aggregator, final=True)
 
     if not args.train_with_orig:
-        cmd = f"python review_run_inference.py --dataset {args.dataset} --expt_id {experiment_id} --device {DEVICE[-1]}"
+        cmd = f"python run_inference_long_seq.py --dataset {args.dataset} --expt_id {experiment_id} --device {DEVICE[-1]}"
         ret = os.system(cmd)
         if ret != 0:
             print(f"Error in running inference script")

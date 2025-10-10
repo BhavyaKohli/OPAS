@@ -156,7 +156,7 @@ if __name__ == '__main__':
     DEVICE = 'cpu'
     if args.log : logging.info(f"{DEVICE=}")
 
-    root = "../../final_data_rev/"
+    root = "../../final_data/"
     dataset_name = args.dataset_name
     dataset_dir = os.path.join(root, dataset_name)
     
