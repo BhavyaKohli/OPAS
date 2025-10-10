@@ -30,43 +30,7 @@ from transformers import get_linear_schedule_with_warmup, AdamW
 import torchaudio.transforms as T
 
 
-tqdm = partial(tqdm, ncols=100)
-
-
-class DummyScoreModel(nn.Module):
-    def __init__(self, indim=2, outdim=1) :
-        super().__init__()
-        self.weight = nn.Parameter(torch.randn(indim, outdim))
-    def forward(self, x) :
-        logits = x.sum(dim=-1)
-        return nn.Sigmoid()(logits)
-
-
-class LamModel4LongSeq(nn.Module):
-    def __init__(self, M, N, stagger):
-        super().__init__()
-        self.model = nn.Sequential(
-            nn.Conv2d(stagger+1, 4, kernel_size=(1, N//4)),
-            nn.MaxPool2d((1, 2)),
-            nn.ReLU(),
-            nn.Conv2d(4, 4, kernel_size=(1, N//16)),
-            nn.MaxPool2d((1,2)),
-            nn.ReLU(),
-            # nn.Conv2d(4, 4, kernel_size=(1, N//16)),
-            # nn.MaxPool2d((1,2)),
-            # nn.ReLU(),
-            nn.Conv2d(4, M, kernel_size=(1, N//16)),
-            nn.AdaptiveAvgPool2d((1,20)),
-            nn.ReLU(),
-            nn.Flatten(start_dim=2),
-            nn.Linear(20, M),
-            nn.ReLU(),
-            nn.Linear(M, 1),
-            nn.Sigmoid()
-        )
-    
-    def forward(self, x):
-        return self.model(x)
+tqdm = partial(tqdm, ncols=150)
 
 
 class Attention_Layer(nn.Module):
@@ -86,7 +50,7 @@ class Attention_Layer(nn.Module):
 @torch.no_grad()
 def compute_metrics(dataset, model, scoremodel, embed_model, preembed_model, image_embed_model=None, stagger=2, verbose=False, aggregator=None):
 
-    loader = dataset.get_dataloader(batch_size=100, shuffle=True)
+    loader = dataset.get_dataloader(batch_size=150, shuffle=True)
 
     C = embed_full_corpus(dataset, embed_model, preembed_model, image_embed_model=image_embed_model, aggregator=aggregator)
     # C is (N, n, xoutdim)
@@ -101,62 +65,53 @@ def compute_metrics(dataset, model, scoremodel, embed_model, preembed_model, ima
         q = embed_model(preembed_model(q))
         q = normalize(q)
         # q is (b, m, xoutdim)
-
-        inner_score, inner_labels = [], []
-        for cmini in range(0,len(C),50):
-            C_ = C[cmini:cmini+50]
-
-            if aggregator is None:
-                if not NOLAMMODEL:
-                    qct = torch.einsum("bmd,Nnd->bNmn", q, C_)   # verified
-                    if args.use_linear_lammodel:
-                        lambdas = []
-                        for xx in range(len(q)):
-                            q_ = q[xx].unsqueeze(0)
-                            q_ = q_.repeat_interleave(C_.shape[0], dim=0)
-                            lambdas_ = model(torch.cat((q_, C_), dim=1).flatten(start_dim=1)).unsqueeze(-1)
-                            lambdas.append(lambdas_)
-                        lambdas = torch.stack(lambdas)
-                    else:
-                        model_inputs = stagger_and_concat(qct, num_stagger=stagger)
-                        if stagger==0: 
-                            model_inputs = model_inputs.squeeze(1)
-                        lambdas = torch.stack([model(x) for x in model_inputs])
-                    
-                    F_mat = Rm_mat.T @ (2*qct + (a_vec @ lambdas.transpose(2,3) @ A_mat).transpose(2,3))
-                    del qct
+        if aggregator is None:
+            if not NOLAMMODEL:
+                qct = torch.einsum("bmd,Nnd->bNmn", q, C)   # verified
+                if args.use_linear_lammodel:
+                    lambdas = []
+                    for xx in range(len(q)):
+                        q_ = q[xx].unsqueeze(0)
+                        q_ = q_.repeat_interleave(C.shape[0], dim=0)
+                        lambdas_ = model(torch.cat((q_, C), dim=1).flatten(start_dim=1)).unsqueeze(-1)
+                        lambdas.append(lambdas_)
+                    lambdas = torch.stack(lambdas)
                 else:
-                    F_mat = Rm_mat.T @ (
-                        torch.stack([-(q[i][None].unsqueeze(2) - C_.unsqueeze(1)).relu().sum(-1) for i in range(len(q))])
-                    )
-                    lambdas = torch.ones((len(q), len(C_), M, 1), device=F_mat.device)
-
-                P = gumbel_sinkhorn(F_mat, CFG.tau, CFG.n_sink_iter, noise=False)
-
-                RmPC = Rm_mat @ P @ C_.squeeze(-1)
-
-                if args.no_lamrelu:
-                    lamscore = lamwt * (lambdas.transpose(2,3) @ (b-A_mat @ Rm_mat @ P @ a_vec)).squeeze()
-                else:
-                    lamscore = lamwt * (lambdas.transpose(2,3) @ F.relu(b-A_mat @ Rm_mat @ P @ a_vec)).squeeze()
-                normscore = torch.norm(q.unsqueeze(1) - RmPC, dim=[-1,-2])
-
-                allscores = torch.stack([lamscore, normscore], dim=2)
-                netscore = 2*scoremodel(-allscores).squeeze()      # b
-                del P, F_mat, RmPC
-
+                    model_inputs = stagger_and_concat(qct, num_stagger=stagger)
+                    if stagger==0: 
+                        model_inputs = model_inputs.squeeze(1)
+                    lambdas = torch.stack([model(x) for x in model_inputs])
+                
+                F_mat = Rm_mat.T @ (2*qct + (a_vec @ lambdas.transpose(2,3) @ A_mat).transpose(2,3))
+                del qct
             else:
-                q = aggregator[0](q)
-                # q is bd, C is Nd, we want bN scores
-                # b1d - 1Nd = bNd --> sum across last dim to get bN scores
-                netscore = 2 * F.sigmoid(-F.relu(q.unsqueeze(1) - C_.unsqueeze(0)).sum(dim=-1))    # bN
-                # TODO: fix this
-                if args.deepset_mode == "cosine":     # 3
-                    netscore = 0.5 * (F.cosine_similarity(q.unsqueeze(1), C_.unsqueeze(0), dim=-1) + 1)
+                F_mat = Rm_mat.T @ (
+                    torch.stack([-(q[i][None].unsqueeze(2) - C.unsqueeze(1)).relu().sum(-1) for i in range(len(q))])
+                )
+                lambdas = torch.ones((len(q), len(C), M, 1), device=F_mat.device)
 
-            inner_score.append(netscore.to('cpu'))
-        netscore = torch.cat(inner_score, dim=-1)        
-        del q
+            P = gumbel_sinkhorn(F_mat, CFG.tau, CFG.n_sink_iter, noise=False)
+
+            RmPC = Rm_mat @ P @ C.squeeze(-1)
+
+            if args.no_lamrelu:
+                lamscore = lamwt * (lambdas.transpose(2,3) @ (b-A_mat @ Rm_mat @ P @ a_vec)).squeeze()
+            else:
+                lamscore = lamwt * (lambdas.transpose(2,3) @ F.relu(b-A_mat @ Rm_mat @ P @ a_vec)).squeeze()
+            normscore = torch.norm(q.unsqueeze(1) - RmPC, dim=[-1,-2])
+
+            allscores = torch.stack([lamscore, normscore], dim=2)
+            netscore = 2*scoremodel(-allscores).squeeze()      # b
+            del P, F_mat, RmPC, q
+
+        else:
+            q = aggregator[0](q)
+            # q is bd, C is Nd, we want bN scores
+            # b1d - 1Nd = bNd --> sum across last dim to get bN scores
+            netscore = 2 * F.sigmoid(-F.relu(q.unsqueeze(1) - C.unsqueeze(0)).sum(dim=-1))    # bN
+            # TODO: fix this
+            if args.deepset_mode == "cosine":     # 3
+                netscore = 0.5 * (F.cosine_similarity(q.unsqueeze(1), C.unsqueeze(0), dim=-1) + 1)
 
         netscores.append(netscore.to('cpu'))
         true_labels.append(l.to('cpu'))
@@ -356,6 +311,8 @@ if __name__ == '__main__':
         spec_conf = OmegaConf.load("configs/cifar.yaml")
     elif "lsun" in dataset:
         spec_conf = OmegaConf.load("configs/lsun.yaml")
+    elif "text" in dataset:
+        spec_conf = OmegaConf.load("configs/text.yaml")
     else:
         raise NotImplementedError(f"Check dataset name")
     
@@ -383,6 +340,8 @@ if __name__ == '__main__':
         args.speech = True
         args.human = True
         experiment_id = f"S{experiment_id}"
+    elif "text" in args.dataset:
+        experiment_id = f"T{experiment_id}"
     elif "video" in args.dataset:
         args.video = True
         experiment_id = f"V{experiment_id}"
@@ -455,7 +414,7 @@ if __name__ == '__main__':
         with open(f"{EXPT_ROOT}/config.yaml", "w") as f:
             OmegaConf.save(main_conf, f)
 
-    DATA_ROOT = f"final_data_rev/{args.dataset}"
+    DATA_ROOT = f"final_data/{args.dataset}"
 
     TRAIN_FILE = f"{DATA_ROOT}/dataset_train.hdf5"
     TEST_FILE = f"{DATA_ROOT}/dataset_test.hdf5"
@@ -498,7 +457,6 @@ if __name__ == '__main__':
     logging.info("*"*120+"\n"+"*"*120)
 
     A_mat, a_vec, Rm_mat = get_opas_constants(PARAMS.M, PARAMS.N, DEVICE)
-    a_vec = torch.arange(N).reshape(a_vec.shape).float().to(DEVICE) # for long sequences, cant use exponentiation
 
     batch_size = args.batch_size
     positive_samples = 10
@@ -557,11 +515,8 @@ if __name__ == '__main__':
 
     M, N = PARAMS.M, PARAMS.N
 
-    if getattr(args, "dummy_scoremodel", False):
-        scoremodel = DummyScoreModel().to(DEVICE)
-    else:
-        scoremodel = ScoreModel().to(DEVICE)
-
+    scoremodel = ScoreModel().to(DEVICE)
+    
     tokenize_transform = lambda x: tokenize(x, args)[0]
     d_model = 256
     lin_transform = nn.Sequential(
@@ -602,7 +557,7 @@ if __name__ == '__main__':
         preembed_optimizer = torch.optim.Adam(preembed_model.parameters(), amsgrad=True, lr=args.lr)
 
     embed_model = nn.Sequential(
-        PositionalEncoding(d_model=d_model, max_seq_length=1000),
+        PositionalEncoding(d_model=d_model, max_seq_length=500),
         nn.TransformerEncoder(nn.TransformerEncoderLayer(d_model=d_model, nhead=args.xnhead, batch_first=True, dim_feedforward=args.xff), args.xnumlayers),
         nn.Linear(d_model, args.xoutdim)
     ).to(DEVICE)
@@ -660,8 +615,7 @@ if __name__ == '__main__':
     else:
         aggregator = None
 
-    model = LamModel4LongSeq(M, N, stagger).to(DEVICE)
-
+    model = LamModel(M, N, stagger).to(DEVICE)
     if args.use_linear_lammodel:
         model = nn.Sequential(nn.Linear((M+N)*args.xoutdim, M), nn.Sigmoid()).to(DEVICE)
     if getattr(args, "fix_lambdas", None) is not None:
@@ -778,7 +732,6 @@ if __name__ == '__main__':
         wandb_losslog = []
         inner_pbar = tqdm(trainloader, disable=False, leave=False)
         for n, (q, c, l) in enumerate(inner_pbar):
-            # import ipdb; ipdb.set_trace()
             qpos, cpos, lpos = train_dataset.get_positive_samples(positive_samples)
             q = torch.cat((q, qpos), dim=0).to(DEVICE)
             c = torch.cat((c, cpos), dim=0).to(DEVICE)
@@ -898,13 +851,12 @@ if __name__ == '__main__':
         if DEEPSET:
             aggregator.eval()
         if not args.use_sing_xfmer:
-            if (i-1) % 3 == 0:
-                MAP, MRR = compute_metrics(val_dataset, model, scoremodel, embed_model, preembed_model, image_embed_model=image_embed_model, stagger=stagger, verbose=False, aggregator=aggregator)
+            MAP, MRR = compute_metrics(val_dataset, model, scoremodel, embed_model, preembed_model, image_embed_model=image_embed_model, stagger=stagger, verbose=False, aggregator=aggregator)
 
-                if MAP > best_val_MAP: 
-                    best_val_MAP = MAP
-                    val_MRR_at_best = MRR
-                    if not args.debug: save_models(model, scoremodel, embed_model, preembed_model, aggregator)
+            if MAP > best_val_MAP: 
+                best_val_MAP = MAP
+                val_MRR_at_best = MRR
+                if not args.debug: save_models(model, scoremodel, embed_model, preembed_model, aggregator)
 
             if enforce_order:
                 odr = compute_odr(val_dataset, model, scoremodel, embed_model, preembed_model, stagger=stagger, verbose=False)
@@ -943,7 +895,7 @@ if __name__ == '__main__':
     if not args.debug: save_models(model, scoremodel, embed_model, preembed_model, aggregator, final=True)
 
     if not args.train_with_orig:
-        cmd = f"python review_run_inference.py --dataset {args.dataset} --expt_id {experiment_id} --device {DEVICE[-1]}"
+        cmd = f"python run_inference.py --dataset {args.dataset} --expt_id {experiment_id} --device {DEVICE[-1]}"
         ret = os.system(cmd)
         if ret != 0:
             print(f"Error in running inference script")

@@ -23,6 +23,9 @@ for dataset in "audio" "speech" "cifar-large" "lsun"; do
     python main.py dataset=$dataset device=$device stagger=0                                # stagger=0
     python main.py dataset=$dataset device=$device stagger=2                                # stagger=2 
 
+    python main.py dataset=$dataset device=$device dummy_scoremodel=True                    # remove trainable beta_1, beta_2 from scoremodel. score will be computed as sigmoid(s_F + s_\lambda)
+    python main_direct_score.py dataset=$dataset device=$device                             # using e_\phi to output scores directly, without sinkhorn and OPAS scoring framework
+
     for niter in 20 15 10 5; do
         python main.py dataset=$dataset device=$device n_sink_iter=$niter                   # sinkhorn sensitivity
     done

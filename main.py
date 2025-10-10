@@ -16,7 +16,7 @@ from opas.tstok.tsutils import TOKENIZER, tokenize, batch_get_white_noise
 from opas.utils import AttributeDict, gumbel_sinkhorn, normalize, get_opas_constants, seed_everything, embed_full_corpus, embed_if_image_and_normalize, stagger_and_concat
 from opas.data import PairDatasetTrain, PairDatasetTest
 
-from opas.models.main import LamModel, ScoreModel, PositionalEncoding, TransformInput
+from opas.models.main import LamModel, ScoreModel, PositionalEncoding, TransformInput, DummyScoreModel, Attention_Layer
 from opas.models.cifar_embed import Autoencoder
 from opas.models.lsun_embed import Autoencoder as LSUNAutoencoder
 from opas.models.ts_encoders import Conv1dTS, EncConv1dTS, MelConv1dTS
@@ -30,21 +30,7 @@ from transformers import get_linear_schedule_with_warmup, AdamW
 import torchaudio.transforms as T
 
 
-tqdm = partial(tqdm, ncols=150)
-
-
-class Attention_Layer(nn.Module):
-    def __init__(self, n_feats: int) -> None:
-        super().__init__()
-        self.w = nn.Linear(
-            in_features=n_feats,
-            out_features=n_feats
-        )
-    
-    def forward(self, X: torch.Tensor) -> torch.Tensor:
-        w = self.w(X)
-        output = F.softmax(torch.mul(X, w), dim=1)
-        return output
+tqdm = partial(tqdm, ncols=100)
 
 
 @torch.no_grad()
@@ -311,8 +297,6 @@ if __name__ == '__main__':
         spec_conf = OmegaConf.load("configs/cifar.yaml")
     elif "lsun" in dataset:
         spec_conf = OmegaConf.load("configs/lsun.yaml")
-    elif "text" in dataset:
-        spec_conf = OmegaConf.load("configs/text.yaml")
     else:
         raise NotImplementedError(f"Check dataset name")
     
@@ -340,8 +324,6 @@ if __name__ == '__main__':
         args.speech = True
         args.human = True
         experiment_id = f"S{experiment_id}"
-    elif "text" in args.dataset:
-        experiment_id = f"T{experiment_id}"
     elif "video" in args.dataset:
         args.video = True
         experiment_id = f"V{experiment_id}"
@@ -449,6 +431,16 @@ if __name__ == '__main__':
         assert dataset_file['Q'].shape[1]==M, 'Shape mismatch in val'
         assert dataset_file['C'].shape[1]==N, 'N Shape mismatch in val'
 
+    if N >= 50:
+        print("Long sequence dataset. Please use main_long_seq.py instead. Main differences: redefined a_vec, LamModel4LongSeq, compute_metrics with smaller batch sizes and additional internal loops.")
+        check = input(f"Delete expt dir at: {EXPT_ROOT}? y/n")
+        if check.lower() == "y":
+            import shutil
+            shutil.rmtree(EXPT_ROOT)
+        else:
+            print(f"Keeping failed expt dir {EXPT_ROOT}")
+        exit()
+    
     # update params
     PARAMS.N = N            # length of corpus item
     PARAMS.M = M            # length of query
@@ -515,8 +507,11 @@ if __name__ == '__main__':
 
     M, N = PARAMS.M, PARAMS.N
 
-    scoremodel = ScoreModel().to(DEVICE)
-    
+    if getattr(args, "dummy_scoremodel", False):
+        scoremodel = DummyScoreModel().to(DEVICE)
+    else:
+        scoremodel = ScoreModel().to(DEVICE)
+
     tokenize_transform = lambda x: tokenize(x, args)[0]
     d_model = 256
     lin_transform = nn.Sequential(

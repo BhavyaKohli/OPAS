@@ -1,6 +1,6 @@
 import os
 
-from review_main import *
+from main_long_seq import *
 from opas.utils import get_opas_constants
 from opas.models.model_utils import load_models, get_image_embed_model
 
@@ -23,40 +23,62 @@ def compute_metrics(dataset, model, scoremodel, embed_model, preembed_model, ima
         q = embed_model(preembed_model(q))
         q = normalize(q)
         # q is (b, m, xoutdim)
-        if aggregator is None:
-            qct = torch.einsum("bmd,Nnd->bNmn", q, C)
-            if isinstance(model, LamModel) or isinstance(model, DummyLamModel):
-                model_inputs = stagger_and_concat(qct, num_stagger=stagger) # bNsmn  s = num_stagger+1
-                lambdas = torch.stack([model(x) for x in model_inputs])
-                # bNm1
+
+        inner_score, inner_labels = [], []
+        for cmini in range(0,len(C),50):
+            C_ = C[cmini:cmini+50]
+
+            if aggregator is None:
+                if True:
+                    qct = torch.einsum("bmd,Nnd->bNmn", q, C_)   # verified
+                    if args.use_linear_lammodel:
+                        lambdas = []
+                        for xx in range(len(q)):
+                            q_ = q[xx].unsqueeze(0)
+                            q_ = q_.repeat_interleave(C_.shape[0], dim=0)
+                            lambdas_ = model(torch.cat((q_, C_), dim=1).flatten(start_dim=1)).unsqueeze(-1)
+                            lambdas.append(lambdas_)
+                        lambdas = torch.stack(lambdas)
+                    else:
+                        model_inputs = stagger_and_concat(qct, num_stagger=stagger)
+                        if stagger==0: 
+                            model_inputs = model_inputs.squeeze(1)
+                        lambdas = torch.stack([model(x) for x in model_inputs])
+                    
+                    F_mat = Rm_mat.T @ (2*qct + (a_vec @ lambdas.transpose(2,3) @ A_mat).transpose(2,3))
+                    del qct
+                else:
+                    F_mat = Rm_mat.T @ (
+                        torch.stack([-(q[i][None].unsqueeze(2) - C_.unsqueeze(1)).relu().sum(-1) for i in range(len(q))])
+                    )
+                    lambdas = torch.ones((len(q), len(C_), M, 1), device=F_mat.device)
+
+                P = gumbel_sinkhorn(F_mat, CFG.tau, CFG.n_sink_iter, noise=False)
+
+                RmPC = Rm_mat @ P @ C_.squeeze(-1)
+
+                if args.no_lamrelu:
+                    lamscore = lamwt * (lambdas.transpose(2,3) @ (b-A_mat @ Rm_mat @ P @ a_vec)).squeeze()
+                else:
+                    lamscore = lamwt * (lambdas.transpose(2,3) @ F.relu(b-A_mat @ Rm_mat @ P @ a_vec)).squeeze()
+                normscore = torch.norm(q.unsqueeze(1) - RmPC, dim=[-1,-2])
+
+                allscores = torch.stack([lamscore, normscore], dim=2)
+                netscore = 2*scoremodel(-allscores).squeeze()      # b
+                del P, F_mat, RmPC
+
             else:
-                lambdas = []
-                for xx in range(len(q)):
-                    q_ = q[xx].unsqueeze(0)
-                    q_ = q_.repeat_interleave(C.shape[0], dim=0)
-                    lambdas_ = model(torch.cat((q_, C), dim=1).flatten(start_dim=1)).unsqueeze(-1)
-                    lambdas.append(lambdas_)
-                lambdas = torch.stack(lambdas)
+                q = aggregator[0](q)
+                # q is bd, C is Nd, we want bN scores
+                # b1d - 1Nd = bNd --> sum across last dim to get bN scores
+                netscore = 2 * F.sigmoid(-F.relu(q.unsqueeze(1) - C_.unsqueeze(0)).sum(dim=-1))    # bN
+                # TODO: fix this
+                if args.deepset_mode == "cosine":     # 3
+                    netscore = 0.5 * (F.cosine_similarity(q.unsqueeze(1), C_.unsqueeze(0), dim=-1) + 1)
 
-            F_mat = Rm_mat.T @ (2*qct + (a_vec @ lambdas.transpose(2,3) @ A_mat).transpose(2,3))
-
-            P = gumbel_sinkhorn(F_mat, CFG.tau, CFG.n_sink_iter, noise=False)
-
-            RmPC = Rm_mat @ P @ C.squeeze(-1)
-
-            lamscore = lamwt * (lambdas.transpose(2,3) @ F.relu(b-A_mat @ Rm_mat @ P @ a_vec)).squeeze()
-            normscore = torch.norm(q.unsqueeze(1) - RmPC, dim=[-1,-2])
-
-            allscores = torch.stack([lamscore, normscore], dim=2)
-            netscore = 2*scoremodel(-allscores).squeeze()      # b
-
-        else:
-            q = aggregator[0](q)
-            # q is bd, C is Nd, we want bN scores
-            # b1d - 1Nd = bNd --> sum across last dim to get bN scores
-            netscore = 2 * F.sigmoid(-F.relu(q.unsqueeze(1) - C.unsqueeze(0)).sum(dim=-1))    # bN
-            if args.deepset_mode == "cosine":     # 3
-                netscore = 0.5 * (F.cosine_similarity(q.unsqueeze(1), C.unsqueeze(0), dim=-1) + 1)
+            inner_score.append(netscore.to('cpu'))
+        netscore = torch.cat(inner_score, dim=-1)        
+        del q
 
         netscores.append(netscore.to('cpu'))
         true_labels.append(l.to('cpu'))
@@ -67,15 +89,14 @@ def compute_metrics(dataset, model, scoremodel, embed_model, preembed_model, ima
     ranking = netscores.argsort(dim=1, descending=True)
     ranked_output = torch.gather(true_labels, dim=1, index=ranking)
 
-    mRR = (1 / (ranked_output.argmax(dim=1) + 1)).mean().item()
+    MRR = (1 / (ranked_output.argmax(dim=1) + 1)).mean().item()
 
-    mAP = (torch.cumsum(ranked_output, dim=1) * ranked_output).float()
-    mAP /= (torch.arange(ranked_output.shape[1]) + 1)
-    mAP /= torch.sum(ranked_output, dim=1, keepdim=True)
-    mAP = mAP.sum(dim=1).mean().item()
+    MAP = (torch.cumsum(ranked_output, dim=1) * ranked_output).float()
+    MAP /= (torch.arange(ranked_output.shape[1]) + 1)
+    MAP /= torch.sum(ranked_output, dim=1, keepdim=True)
+    MAP = MAP.sum(dim=1).mean().item()
 
-    return mAP, mRR
-
+    return MAP, MRR
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -108,7 +129,7 @@ if __name__ == "__main__":
 
     print(f"normscore weight: {nwt:.4f}, lamscore weight: {lamwt:.4f}")
     
-    DATA_ROOT = f"final_data/{dataset}"
+    DATA_ROOT = f"final_data_rev/{dataset}"
     TEST_FILE = f"{DATA_ROOT}/dataset_test.hdf5"
 
     image_embed_model, TEST_FILE = get_image_embed_model(dataset, [TEST_FILE], device=DEVICE)
@@ -136,6 +157,7 @@ if __name__ == "__main__":
         print(f"Using fixed lambdas: {fix_lambdas}")
 
     A_mat, a_vec, Rm_mat = get_opas_constants(M, N, DEVICE)
+    a_vec = torch.arange(N).reshape(a_vec.shape).float().to(DEVICE) # for long sequences, cant use exponentiation
 
     CFG = AttributeDict({
         'tau': 1,

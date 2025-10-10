@@ -10,7 +10,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 sys.path.append(os.path.abspath(os.path.pardir))
-from review_main_long_seq import *
+from main_long_seq import *
 
 from time import time
 from argparse import Namespace as AttributeDict

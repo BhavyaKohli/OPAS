@@ -33,15 +33,6 @@ import torchaudio.transforms as T
 tqdm = partial(tqdm, ncols=100)
 
 
-class DummyScoreModel(nn.Module):
-    def __init__(self, indim=2, outdim=1) :
-        super().__init__()
-        self.weight = nn.Parameter(torch.randn(indim, outdim))
-    def forward(self, x) :
-        logits = x.sum(dim=-1)
-        return nn.Sigmoid()(logits)
-
-
 class ScorerEmbedPhi(nn.Module):
     def __init__(self, d_model, args):
         super().__init__()
@@ -58,20 +49,6 @@ class ScorerEmbedPhi(nn.Module):
         x = self.embed_base(x)
         x = x.mean(dim=1)                   # B x d_model
         return self.scorer(x).squeeze()     # B
-
-
-class Attention_Layer(nn.Module):
-    def __init__(self, n_feats: int) -> None:
-        super().__init__()
-        self.w = nn.Linear(
-            in_features=n_feats,
-            out_features=n_feats
-        )
-    
-    def forward(self, X: torch.Tensor) -> torch.Tensor:
-        w = self.w(X)
-        output = F.softmax(torch.mul(X, w), dim=1)
-        return output
 
 
 @torch.no_grad()
@@ -959,11 +936,3 @@ if __name__ == '__main__':
     print(f"Final test metrics: MAP,MRR: {MAP:.4f},{MRR:.4f}")
 
     if not args.debug: save_models(model, scoremodel, embed_model, preembed_model, aggregator, final=True)
-
-    if not args.train_with_orig:
-        cmd = f"python run_inference.py --dataset {args.dataset} --expt_id {experiment_id} --device {DEVICE[-1]}"
-        ret = os.system(cmd)
-        if ret != 0:
-            print(f"Error in running inference script")
-
-    logging.info("*"*120+"\n"+"*"*120)
