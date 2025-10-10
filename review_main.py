@@ -16,7 +16,7 @@ from opas.tstok.tsutils import TOKENIZER, tokenize, batch_get_white_noise
 from opas.utils import AttributeDict, gumbel_sinkhorn, normalize, get_opas_constants, seed_everything, embed_full_corpus, embed_if_image_and_normalize, stagger_and_concat
 from opas.data import PairDatasetTrain, PairDatasetTest
 
-from opas.models.main import LamModel, ScoreModel, PositionalEncoding, TransformInput
+from opas.models.main import LamModel, ScoreModel, PositionalEncoding, TransformInput, DummyScoreModel, LamModel4LongSeq, Attention_Layer
 from opas.models.cifar_embed import Autoencoder
 from opas.models.lsun_embed import Autoencoder as LSUNAutoencoder
 from opas.models.ts_encoders import Conv1dTS, EncConv1dTS, MelConv1dTS
@@ -31,29 +31,6 @@ import torchaudio.transforms as T
 
 
 tqdm = partial(tqdm, ncols=100)
-
-
-class DummyScoreModel(nn.Module):
-    def __init__(self, indim=2, outdim=1) :
-        super().__init__()
-        self.weight = nn.Parameter(torch.randn(indim, outdim))
-    def forward(self, x) :
-        logits = x.sum(dim=-1)
-        return nn.Sigmoid()(logits)
-
-
-class Attention_Layer(nn.Module):
-    def __init__(self, n_feats: int) -> None:
-        super().__init__()
-        self.w = nn.Linear(
-            in_features=n_feats,
-            out_features=n_feats
-        )
-    
-    def forward(self, X: torch.Tensor) -> torch.Tensor:
-        w = self.w(X)
-        output = F.softmax(torch.mul(X, w), dim=1)
-        return output
 
 
 @torch.no_grad()
@@ -623,7 +600,11 @@ if __name__ == '__main__':
     else:
         aggregator = None
 
-    model = LamModel(M, N, stagger).to(DEVICE)
+    if N <= 50:
+        model = LamModel(M, N, stagger).to(DEVICE)
+    else:
+        model = LamModel4LongSeq(M, N, stagger).to(DEVICE)   # slight modifications when dealing with longer sequences
+    
     if args.use_linear_lammodel:
         model = nn.Sequential(nn.Linear((M+N)*args.xoutdim, M), nn.Sigmoid()).to(DEVICE)
     if getattr(args, "fix_lambdas", None) is not None:
@@ -689,7 +670,6 @@ if __name__ == '__main__':
 
                 q, c = embed_model(preembed_model(qorig)), embed_model(preembed_model(corig))
                 q, c = normalize(q, c)
-                loss = F.mse_loss(qorig, q) + F.mse_loss(corig, c)
                 
                 embed_optimizer.zero_grad()
                 if args.preembed != "tokenize": 
