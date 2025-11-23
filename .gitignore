@@ -2,6 +2,7 @@ final_data/*
 colab_notebooks/
 models/*
 models_/
+models_colbert/
 models_old/
 hashing/
 xhashing/
