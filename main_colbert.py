@@ -27,12 +27,12 @@ from opas.models.model_utils import load_models
 from functools import partial
 from transformers import get_linear_schedule_with_warmup
 
+from transformers import BertConfig
 from colbert.modeling.colbert import ColBERT
 from colbert.utils.amp import MixedPrecisionManager
 
 
 tqdm = partial(tqdm, ncols=100)
-
 
 
 @torch.no_grad()
@@ -43,7 +43,7 @@ def embed_full_corpus(dataset, colbert, image_embed_model=None, inner_batch_size
     Cembed = []
     for batch in tqdm(range(0, len(C), inner_batch_size), disable=not verbose, leave=False, desc="Embedding..."):
         c = C[batch:batch+inner_batch_size].to(next(colbert.parameters()).device)
-        c = embed_if_image_and_normalize(c, image_embed_model)
+        c = embed_if_image_and_normalize(c, image_embed_model)[...,::samp_rate_step]
         c = torch.cat((colbert.doc_identifier.repeat(c.shape[0],1,1), c), dim=1)
         c = colbert.pretransform_to_bert(c)
         size_c = lambda: (len(c), c.shape[1])
@@ -68,7 +68,7 @@ def compute_metrics(dataset, colbert, image_embed_model=None, stagger=2, verbose
         q = q.to(next(colbert.parameters()).device) 
         # q is bmd, c is Nnd, l is bN
         q = q + batch_get_white_noise(q, args.SNR)     # torch.randn_like(q) * noise
-        q = embed_if_image_and_normalize(q, image_embed_model)
+        q = embed_if_image_and_normalize(q, image_embed_model)[...,::samp_rate_step]
         q = torch.cat((colbert.query_identifier.repeat(q.shape[0],1,1), q), dim=1)
         q = colbert.pretransform_to_bert(q)
         size_q = lambda: (len(q), q.shape[1])
@@ -124,7 +124,7 @@ if __name__ == '__main__':
         # torch.use_deterministic_algorithms(True)    #causes .backward() issues with adaptive pooling
     seed_everything(args.seed)
 
-    experiment_id = datetime.now().strftime("%d%m%H%M")
+    experiment_id = datetime.now().strftime("%d%m%H%M%S")
     args.human = args.video = args.cifar = args.lsun = False
     image_embed_model = None
     if "audio" in args.dataset:
@@ -319,7 +319,7 @@ if __name__ == '__main__':
 
     M, N = PARAMS.M, PARAMS.N
 
-    tokenize_transform = lambda x: tokenize(x, args)[0]
+    tokenize_transform = lambda x: tokenize(x, args)[0].float()
     d_model = 768
     lin_transform = nn.Sequential(
         nn.Linear(samp_rate, d_model),
@@ -327,18 +327,21 @@ if __name__ == '__main__':
         nn.Linear(d_model, d_model),
     )
     identity = lambda x: x
-    
-    colbert = ColBERT.from_pretrained(
-        'bert-base-uncased',
+
+    samp_rate_step = getattr(args, "samp_rate_step", 1)
+    samp_rate_override = int(samp_rate // samp_rate_step)
+
+    colbert = ColBERT(
+        BertConfig(hidden_size=samp_rate_override, num_attention_heads=10, num_hidden_layers=6),
         query_maxlen=M+1,
         doc_maxlen=N+1,
         dim=128,
         similarity_metric="cosine",
         mask_punctuation=False
     )
-    colbert.pretransform_to_bert = lin_transform
-    colbert.register_buffer("query_identifier", nn.Parameter(torch.randn(1,samp_rate), requires_grad=True))
-    colbert.register_buffer("doc_identifier", nn.Parameter(torch.randn(1,samp_rate), requires_grad=True))
+    colbert.pretransform_to_bert = TransformInput(tokenize_transform)
+    colbert.register_buffer("query_identifier", normalize(nn.Parameter(torch.randn(1,samp_rate_override), requires_grad=True)))
+    colbert.register_buffer("doc_identifier", normalize(nn.Parameter(torch.randn(1,samp_rate_override), requires_grad=True)))
     colbert = colbert.to(DEVICE)
     
     class Identity(nn.Module):
@@ -356,6 +359,7 @@ if __name__ == '__main__':
 
     optimizer = torch.optim.AdamW(colbert.parameters(), lr=lr, eps=1e-8)
     optimizer.zero_grad()
+    scheduler = get_linear_schedule_with_warmup(optimizer, args.xwarmupepochs * len(trainloader), nepochs * len(trainloader))
 
     amp = MixedPrecisionManager(True)
 
@@ -386,9 +390,11 @@ if __name__ == '__main__':
 
             with amp.context():
                 q = q + batch_get_white_noise(q, args.SNR)
-                q, c = embed_if_image_and_normalize(q, image_embed_model), embed_if_image_and_normalize(c, image_embed_model)
-                q = torch.cat((colbert.query_identifier.repeat(q.shape[0],1,1), q), dim=1)
-                c = torch.cat((colbert.doc_identifier.repeat(c.shape[0],1,1), c), dim=1)
+                q = embed_if_image_and_normalize(q, image_embed_model)[...,::samp_rate_step]
+                c = embed_if_image_and_normalize(c, image_embed_model)[...,::samp_rate_step]
+
+                q = torch.cat((normalize(colbert.query_identifier).repeat(q.shape[0],1,1), q), dim=1)
+                c = torch.cat((normalize(colbert.doc_identifier).repeat(c.shape[0],1,1), c), dim=1)
 
                 q = colbert.pretransform_to_bert(q)
                 c = colbert.pretransform_to_bert(c)
@@ -401,8 +407,7 @@ if __name__ == '__main__':
                 # q, c, l are of shape bmd, bnd, b respectively
                 Q = colbert.query(q, attn_qq)[:,0,:]
                 D = colbert.doc(c, attn_cc)[:,0,:]      
-                netscore = Q @ D.permute(1,0)
-
+                netscore = (Q @ D.T).diagonal()
         
             if not getattr(args, "train_with_labels", False):
                 pos_score = netscore[torch.where(l==1)]
@@ -411,10 +416,12 @@ if __name__ == '__main__':
                 neg_minus_pos = (neg_score.unsqueeze(0) - pos_score.unsqueeze(1)).reshape(-1)   # dim(pos_score) * dim(neg_score)
                 loss = F.relu(delta + neg_minus_pos).mean() 
             else:
+                import ipdb; ipdb.set_trace()
                 loss = F.binary_cross_entropy(netscore, l.to(DEVICE), reduction="mean")
 
             amp.backward(loss)
             amp.step(colbert, optimizer)
+            scheduler.step()
 
             pbar.set_postfix_str(f"loss: {loss:.4f}")
             wandb_losslog.append(loss.item())
