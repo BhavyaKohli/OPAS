@@ -48,7 +48,7 @@ def embed_full_corpus(dataset, colbert, image_embed_model=None, inner_batch_size
         c = colbert.pretransform_to_bert(c)
         size_c = lambda: (len(c), c.shape[1])
         c.size = size_c
-        c = colbert.doc(c, torch.ones(len(c), c.shape[1], device=c.device))#[:,0,:]
+        c = colbert.doc(c, torch.ones(len(c), c.shape[1], device=c.device))[:,0,:]
         Cembed.append(c)
     C = torch.vstack(Cembed)
     return C
@@ -73,10 +73,10 @@ def compute_metrics(dataset, colbert, image_embed_model=None, stagger=2, verbose
         q = colbert.pretransform_to_bert(q)
         size_q = lambda: (len(q), q.shape[1])
         q.size = size_q
-        q = colbert.query(q, torch.ones(len(q), q.shape[1], device=q.device))#[:,0,:]
+        q = colbert.query(q, torch.ones(len(q), q.shape[1], device=q.device))[:,0,:]
 
-        netscore = torch.einsum("bmd,Nnd->bNmn", q, C).max(-1).values.sum(-1)  # bNmn -> bNm -> bN
-        # netscore = q @ C.permute(1,0)   # bN
+        # netscore = torch.einsum("bmd,Nnd->bNmn", q, C).max(-1).values.sum(-1)  # bNmn -> bNm -> bN
+        netscore = q @ C.permute(1,0)   # bN
         netscores.append(netscore.to('cpu'))
         true_labels.append(l.to('cpu'))
 
@@ -412,10 +412,10 @@ if __name__ == '__main__':
                 c.size = size_c
 
                 # q, c, l are of shape bmd, bnd, b respectively
-                Q = colbert.query(q, attn_qq)#[:,0,:]
-                D = colbert.doc(c, attn_cc)#[:,0,:]      
-                # netscore = (Q @ D.T).diagonal()
-                netscore = (Q @ D.permute(0,2,1)).max(2).values.sum(1)   # b
+                Q = colbert.query(q, attn_qq)[:,0,:]
+                D = colbert.doc(c, attn_cc)[:,0,:]      
+                netscore = (Q @ D.T).diagonal()
+                # netscore = (Q @ D.permute(0,2,1)).max(2).values.sum(1)   # b
         
                 pos_score = netscore[torch.where(l==1)]
                 neg_score = netscore[torch.where(l==0)]
@@ -491,7 +491,7 @@ if __name__ == '__main__':
     print(f"Final test metrics (last ckpt) {note}: MAP,MRR: {MAP:.4f},{MRR:.4f}")
 
     if note != "":
-        with open("final_results_colbert.txt", "a") as f:
+        with open("final_results_colbert_sv.txt", "a") as f:
             f.write(f"{note}: MAP, MRR (best): {map_bst:.4f}, {mrr_bst:.4f} | MAP, MRR (last): {MAP:.4f}, {MRR:.4f}\n")
 
     logging.info("*"*120+"\n"+"*"*120)

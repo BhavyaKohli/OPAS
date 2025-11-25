@@ -56,10 +56,10 @@ def embed_full_corpus(dataset, colbert, image_embed_model=None, inner_batch_size
 
 @torch.no_grad()
 def compute_metrics(dataset, colbert, image_embed_model=None, stagger=2, verbose=False):
-
-    loader = dataset.get_dataloader(batch_size=150, shuffle=True)
-
     C = embed_full_corpus(dataset, colbert, image_embed_model=image_embed_model)
+
+    loader = dataset.get_dataloader(batch_size=400, shuffle=True)
+
     # C is (N, n, xoutdim)
 
     netscores = []
@@ -269,14 +269,14 @@ if __name__ == '__main__':
 
     neg_expl = args.neg_expl
 
-    train_dataset = PairDatasetTrain(TRAIN_FILE, num_q=args.num_q, negative_exploration=neg_expl, seed=15)
-    trainloader = train_dataset.get_dataloader(batch_size=batch_size, shuffle=True)
-    val_dataset = PairDatasetTest(VAL_FILE)
-    valloader = val_dataset.get_dataloader(batch_size=batch_size, shuffle=False)
+    # train_dataset = PairDatasetTrain(TRAIN_FILE, num_q=args.num_q, negative_exploration=neg_expl, seed=15)
+    # trainloader = train_dataset.get_dataloader(batch_size=batch_size, shuffle=True)
+    # val_dataset = PairDatasetTest(VAL_FILE)
+    # valloader = val_dataset.get_dataloader(batch_size=batch_size, shuffle=False)
     test_dataset = PairDatasetTest(TEST_FILE)
     testloader = test_dataset.get_dataloader(batch_size=batch_size, shuffle=True)
 
-    logging.info(f"Train dataset: {len(train_dataset)} query-corpus pairs, Val dataset: {len(val_dataset)} query-corpus pairs, Test dataset: {len(test_dataset)} queries")
+    # logging.info(f"Train dataset: {len(train_dataset)} query-corpus pairs, Val dataset: {len(val_dataset)} query-corpus pairs, Test dataset: {len(test_dataset)} queries")
 
     ##### HPARAMS ######
     b = args.b          # hinge margin for negative gap penalty (b-Apa)
@@ -364,9 +364,91 @@ if __name__ == '__main__':
 
     optimizer = torch.optim.AdamW(colbert.parameters(), lr=args.xlr, eps=1e-8)
     optimizer.zero_grad()
-    scheduler = get_linear_schedule_with_warmup(optimizer, args.xwarmupepochs * len(trainloader), nepochs * len(trainloader))
+    # scheduler = get_linear_schedule_with_warmup(optimizer, args.xwarmupepochs * len(trainloader), nepochs * len(trainloader))
 
     logging.info(f"Trainable parameters: {sum(p.numel() for p in colbert.parameters() if p.requires_grad):,}")
+
+    from time import time
+    def get_mean_std(arr):
+        return np.mean(arr), np.std(arr)
+    
+    def get_mean_std_formatted(arr):
+        mu, sigma = get_mean_std(arr)
+        return f"{mu:.4f}±{sigma:.4f}"
+
+    def print_stats(ts, num_runs, num_c, num_q, map, mrr):
+        mu, sig = get_mean_std(ts)
+        print(f"Time taken for running inference on {num_q} queries (computing {num_q}*{num_c} scores, averaged over {num_runs} runs): {mu:.4f}±{sig:.4f} s")
+        print(f"Average time for {num_c} comparisons: {(mu/num_q):.4f}±{(sig/num_q):.4f} s/query")
+        print(f"Average time for single comparison: {1000*(mu/num_q/num_c):.4f}±{1000*(sig/num_q/num_c):.4f} ms/query/corpus item")
+
+        
+        print(f"\n\nPerformance ({num_q} queries, averaged over {num_runs} runs): MAP: {get_mean_std_formatted(map)}, MRR: {get_mean_std_formatted(mrr)}")
+        perf = np.stack((map, mrr)).T
+        maxperf = perf[np.argmax(perf.sum(axis=1))]
+        print(f"Best performance: MAP: {maxperf[0]:.4f}, MRR: {maxperf[1]:.4f}")
+
+    num_runs = 10
+
+    ts = []
+    for _ in tqdm(range(num_runs), desc="Corpus Embedding"):
+        start = time()
+        C = embed_full_corpus(test_dataset, colbert, image_embed_model=image_embed_model, inner_batch_size=800)
+        stop = time()
+        ts.append(stop-start)
+
+    mu, sig = get_mean_std(ts)
+    print(f"Corpus embedding cost for {len(test_dataset.c)} corpus items (one-time cost): {mu:.4f}±{sig:.4f} s (averaged over {num_runs} runs)")
+
+    num_q = 200
+    num_runs = 10
+
+    loader = test_dataset.get_dataloader(batch_size=num_q, shuffle=True)
+    q, l = next(iter(loader))
+
+    ts = []
+    map_, mrr_ = [], []
+    for _ in tqdm(range(num_runs), desc="Query Embedding + Scoring"):
+        start = time()
+        netscores = []
+        true_labels = []
+        for n, (q, l) in enumerate(tqdm(loader, leave=False, disable=True)):
+            q = q.to(next(colbert.parameters()).device) 
+            q = q + batch_get_white_noise(q, args.SNR)     # torch.randn_like(q) * noise
+            q = embed_if_image_and_normalize(q, image_embed_model)[...,::samp_rate_step]
+            q = torch.cat((colbert.query_identifier.repeat(q.shape[0],1,1), q), dim=1)
+            q = colbert.pretransform_to_bert(q)
+            size_q = lambda: (len(q), q.shape[1])
+            q.size = size_q
+            q = colbert.query(q, torch.ones(len(q), q.shape[1], device=q.device))#[:,0,:]
+            netscore = torch.einsum("bmd,Nnd->bNmn", q, C).max(-1).values.sum(-1)  # bNmn -> bNm -> bN
+            # netscore = q @ C.permute(1,0)   # bN
+            netscores.append(netscore.to('cpu'))
+            true_labels.append(l.to('cpu'))
+            break
+
+        netscores = torch.vstack(netscores)
+        true_labels = torch.vstack(true_labels).squeeze() # 
+
+        ranking = netscores.argsort(dim=1, descending=True)
+        ranked_output = torch.gather(true_labels, dim=1, index=ranking)
+
+        MRR = (1 / (ranked_output.argmax(dim=1) + 1)).mean().item()
+
+        MAP = (torch.cumsum(ranked_output, dim=1) * ranked_output).float()
+        MAP /= (torch.arange(ranked_output.shape[1]) + 1)
+        MAP /= torch.sum(ranked_output, dim=1, keepdim=True)
+        MAP = MAP.sum(dim=1).mean().item()
+
+        stop = time()
+        ts.append(stop-start)
+        map_.append(MAP)
+        mrr_.append(MRR)
+
+    print_stats(ts, num_runs, len(test_dataset.c), num_q, map_, mrr_)
+    exit()
+
+
 
     amp = MixedPrecisionManager(True)
 

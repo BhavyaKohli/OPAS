@@ -36,6 +36,47 @@ tqdm = partial(tqdm, ncols=100)
 
 
 @torch.no_grad()
+def compute_odr(dataset, colbert, image_embed_model=None, n_samp=20, stagger=2, verbose=False):
+
+    loader = dataset.get_dataloader(batch_size=1, shuffle=True)
+
+    num_samples = n_samp
+    C = embed_full_corpus(dataset, colbert, image_embed_model=image_embed_model)
+    # C is (N, n, xoutdim)
+
+    odc = []
+    for n, (q, l) in enumerate(tqdm(loader, leave=True, disable=not verbose)):
+        # if n > 100: break
+        q_, l_ = q[0], l[0]
+
+        shuffles = torch.stack([torch.arange(len(q_))] + [s for s in [torch.randperm(len(q_),) for _ in range(num_samples)] if not torch.equal(s, torch.arange(len(q_)))]) 
+
+        q = q_[shuffles]
+        l = l_[None].repeat_interleave(len(q_), dim=0)
+        true_c = C[torch.where(l[0])[0]]
+
+        q = q.to(next(colbert.parameters()).device) 
+        # q is bmd, c is Nnd, l is bN
+        q = q + batch_get_white_noise(q, args.SNR)     # torch.randn_like(q) * noise
+        q = embed_if_image_and_normalize(q, image_embed_model)[...,::samp_rate_step]
+        q = torch.cat((colbert.query_identifier.repeat(q.shape[0],1,1), q), dim=1)
+        q = colbert.pretransform_to_bert(q)
+        size_q = lambda: (len(q), q.shape[1])
+        q.size = size_q
+        q = colbert.query(q, torch.ones(len(q), q.shape[1], device=q.device))#[:,0,:]
+
+        netscore = torch.einsum("bmd,Nnd->bNmn", q, C).max(-1).values.sum(-1)  # bNmn -> bNm -> bN
+        
+        pos = netscore[0]
+        neg = netscore[1:]
+        diff = (pos - neg)
+
+        odc.append((100 * (pos-neg > 0).sum() / np.prod(diff.shape)).item())
+
+    return np.mean(odc)
+
+
+@torch.no_grad()
 def embed_full_corpus(dataset, colbert, image_embed_model=None, inner_batch_size=800, verbose=False):
     C = dataset.c
     if not isinstance(C, torch.Tensor):
@@ -56,10 +97,10 @@ def embed_full_corpus(dataset, colbert, image_embed_model=None, inner_batch_size
 
 @torch.no_grad()
 def compute_metrics(dataset, colbert, image_embed_model=None, stagger=2, verbose=False):
-
-    loader = dataset.get_dataloader(batch_size=150, shuffle=True)
-
     C = embed_full_corpus(dataset, colbert, image_embed_model=image_embed_model)
+
+    loader = dataset.get_dataloader(batch_size=400, shuffle=True)
+
     # C is (N, n, xoutdim)
 
     netscores = []
@@ -126,6 +167,7 @@ if __name__ == '__main__':
     seed_everything(args.seed)
 
     experiment_id = datetime.now().strftime("%d%m%H%M%S")
+    experiment_id = args.expt_id
     args.human = args.video = args.cifar = args.lsun = False
     image_embed_model = None
     if "audio" in args.dataset:
@@ -163,7 +205,7 @@ if __name__ == '__main__':
     else:
         raise NotImplementedError(f"Check dataset name")
 
-    # args.debug = True   # debug mode perma on
+    args.debug = True   # debug mode perma on
     args.wandb_log = False
     TQDM_DISABLE = getattr(args, "tqdm_disable", False)
 
@@ -269,14 +311,14 @@ if __name__ == '__main__':
 
     neg_expl = args.neg_expl
 
-    train_dataset = PairDatasetTrain(TRAIN_FILE, num_q=args.num_q, negative_exploration=neg_expl, seed=15)
-    trainloader = train_dataset.get_dataloader(batch_size=batch_size, shuffle=True)
-    val_dataset = PairDatasetTest(VAL_FILE)
-    valloader = val_dataset.get_dataloader(batch_size=batch_size, shuffle=False)
+    # train_dataset = PairDatasetTrain(TRAIN_FILE, num_q=args.num_q, negative_exploration=neg_expl, seed=15)
+    # trainloader = train_dataset.get_dataloader(batch_size=batch_size, shuffle=True)
+    # val_dataset = PairDatasetTest(VAL_FILE)
+    # valloader = val_dataset.get_dataloader(batch_size=batch_size, shuffle=False)
     test_dataset = PairDatasetTest(TEST_FILE)
     testloader = test_dataset.get_dataloader(batch_size=batch_size, shuffle=True)
 
-    logging.info(f"Train dataset: {len(train_dataset)} query-corpus pairs, Val dataset: {len(val_dataset)} query-corpus pairs, Test dataset: {len(test_dataset)} queries")
+    # logging.info(f"Train dataset: {len(train_dataset)} query-corpus pairs, Val dataset: {len(val_dataset)} query-corpus pairs, Test dataset: {len(test_dataset)} queries")
 
     ##### HPARAMS ######
     b = args.b          # hinge margin for negative gap penalty (b-Apa)
@@ -364,9 +406,31 @@ if __name__ == '__main__':
 
     optimizer = torch.optim.AdamW(colbert.parameters(), lr=args.xlr, eps=1e-8)
     optimizer.zero_grad()
-    scheduler = get_linear_schedule_with_warmup(optimizer, args.xwarmupepochs * len(trainloader), nepochs * len(trainloader))
+    # scheduler = get_linear_schedule_with_warmup(optimizer, args.xwarmupepochs * len(trainloader), nepochs * len(trainloader))
 
     logging.info(f"Trainable parameters: {sum(p.numel() for p in colbert.parameters() if p.requires_grad):,}")
+
+    colbert.load_state_dict(torch.load(f"{EXPT_ROOT}/best.pkl", map_location=DEVICE))
+
+    MAP, MRR = compute_metrics(test_dataset, colbert, image_embed_model=image_embed_model, stagger=stagger, verbose=True)
+    print(f"{dataset} Test metrics: MAP,MRR: {MAP:.4f},{MRR:.4f}")
+
+
+    def get_mean_std(arr):
+        return np.mean(arr), np.std(arr)
+
+    def get_mean_std_formatted(arr):
+        mu, sigma = get_mean_std(arr)
+        return f"{mu:.4f}±{sigma:.4f}"
+
+    odc = []
+    for _ in range(10):
+        odc_ = compute_odr(test_dataset, colbert, image_embed_model=image_embed_model, verbose=True, n_samp=getattr(args, "n_samp_odc", 20))
+        odc.append(odc_)
+
+    print(f"{dataset} ODR: {get_mean_std_formatted(odc)}")
+    exit()
+
 
     amp = MixedPrecisionManager(True)
 
