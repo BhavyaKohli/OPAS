@@ -8,6 +8,8 @@ font = font_manager.FontEntry(fname="arial.ttf", name="Arial")
 font_manager.fontManager.ttflist.append(font)
 
 mpl.rcParams['font.family'] = "Arial"
+mpl.rcParams['pdf.fonttype'] = 42
+mpl.rcParams['ps.fonttype'] = 42
 
 plot_markersize = 10
 opas_markersize = 250
