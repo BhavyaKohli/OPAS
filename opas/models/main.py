@@ -1,6 +1,7 @@
 import math
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 
 
 class TransformInput(nn.Module):
@@ -113,3 +114,38 @@ class Attention_Layer(nn.Module):
         w = self.w(X)
         output = F.softmax(torch.mul(X, w), dim=1)
         return output
+    
+
+from transformers import BertModel, BertConfig
+
+
+class Identity(nn.Module):
+    def __init__(self):
+        super().__init__()
+
+    def forward(self, input_ids, **kwargs):
+        return input_ids.clone()
+
+
+class EmbedSkipBertEmbedder(nn.Module):
+    def __init__(self, indim, outdim, nlayers, nhead):
+        super().__init__()
+        config = BertConfig(
+            hidden_size=indim,
+            num_hidden_layers=nlayers,
+            num_attention_heads=nhead
+        )
+        
+        self.bert = BertModel(config)
+        self.linear = nn.Linear(indim, outdim)
+        self.bert.embeddings = Identity()
+
+    def forward(self, x):
+        x = x.float()
+        attn = torch.ones(x.shape[0], x.shape[1]).to(x.device)
+        shape = lambda: x.shape[:2]
+        x.size = shape
+
+        x = self.bert(x, attention_mask=attn)[0]
+        x = self.linear(x)
+        return x
