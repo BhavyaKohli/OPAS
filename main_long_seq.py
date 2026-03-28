@@ -19,15 +19,15 @@ from opas.data import PairDatasetTrain, PairDatasetTest
 from opas.models.main import LamModel, ScoreModel, PositionalEncoding, TransformInput, DummyScoreModel, LamModel4LongSeq, Attention_Layer
 from opas.models.cifar_embed import Autoencoder
 from opas.models.lsun_embed import Autoencoder as LSUNAutoencoder
-from opas.models.ts_encoders import Conv1dTS, EncConv1dTS, MelConv1dTS
+# from opas.models.ts_encoders import Conv1dTS, EncConv1dTS, MelConv1dTS
 from opas.models.deepset import DeepSetModel
 from opas.models.sortlrl import SortLRL
 from opas.models.model_utils import load_models
 
 from functools import partial
-from transformers import get_linear_schedule_with_warmup, AdamW
+from transformers import get_linear_schedule_with_warmup#, AdamW
 
-import torchaudio.transforms as T
+# import torchaudio.transforms as T
 
 
 tqdm = partial(tqdm, ncols=100)
@@ -298,7 +298,7 @@ class DummyLamModel(nn.Module):
 if __name__ == '__main__':
     cli_conf = OmegaConf.from_cli()
     dataset = cli_conf.dataset
-    if "audio" in dataset:
+    if "audio" in dataset or "music" in dataset:
         spec_conf = OmegaConf.load("configs/audio.yaml")
     elif "speech" in dataset:
         spec_conf = OmegaConf.load("configs/speech.yaml")
@@ -327,7 +327,7 @@ if __name__ == '__main__':
     experiment_id = datetime.now().strftime("%d%m%H%M")
     args.human = args.video = args.cifar = args.lsun = False
     image_embed_model = None
-    if "audio" in args.dataset:
+    if "audio" in args.dataset or "music" in args.dataset:
         experiment_id = f"A{experiment_id}" 
     elif "human" in args.dataset or "speech" in args.dataset:
         args.speech = True
@@ -520,9 +520,6 @@ if __name__ == '__main__':
         nn.Linear(d_model, d_model),
     )
     identity = lambda x: x
-    conv_transform = Conv1dTS(n_ch=4, latent=d_model)
-    # conv_transform = EncConv1dTS(latent=d_model, samp_rate=samp_rate)
-    # conv_transform = MelConv1dTS(latent=d_model, samp_rate=samp_rate)
     
     if args.preembed == "tokenize":
         transform = tokenize_transform
@@ -541,6 +538,9 @@ if __name__ == '__main__':
                 else:
                     raise NotImplementedError    
     elif args.preembed == "conv":
+        conv_transform = Conv1dTS(n_ch=4, latent=d_model)
+        # conv_transform = EncConv1dTS(latent=d_model, samp_rate=samp_rate)
+        # conv_transform = MelConv1dTS(latent=d_model, samp_rate=samp_rate)
         transform = conv_transform
     elif args.preembed == "linear":
         transform = lin_transform
@@ -620,10 +620,10 @@ if __name__ == '__main__':
     optimizer = torch.optim.Adam(model.parameters(), lr=lr, amsgrad=True)
     sc_optimizer = torch.optim.Adam(scoremodel.parameters(), lr=lr, amsgrad=True, weight_decay=1e-2)
 
-    tf = T.LFCC(sample_rate=4000, n_lfcc=40, log_lf=False, speckwargs={"n_fft": 1024}).to(DEVICE)
     
     ################ NOT USED ######################
     if args.lfcc: 
+        tf = T.LFCC(sample_rate=4000, n_lfcc=40, log_lf=False, speckwargs={"n_fft": 1024}).to(DEVICE)
         TRANSFORM = lambda x: tf(x).flatten(start_dim=-2)
     else:
         TRANSFORM = lambda x: x
@@ -716,10 +716,10 @@ if __name__ == '__main__':
     enforce_order = args.enforce_order
 
     for i in pbar:
-        if i == 1:
-            if not args.use_sing_xfmer:
-                # sanity check on compute metrics
-                _, _ = compute_metrics(val_dataset, model, scoremodel, embed_model, preembed_model, image_embed_model=image_embed_model, stagger=stagger, verbose=True, aggregator=aggregator)
+        # if i == 1:
+        #     if not args.use_sing_xfmer:
+        #         # sanity check on compute metrics
+        #         _, _ = compute_metrics(val_dataset, model, scoremodel, embed_model, preembed_model, image_embed_model=image_embed_model, stagger=stagger, verbose=True, aggregator=aggregator)
         
         model.train(), scoremodel.train(), embed_model.train(), preembed_model.train()
         if DEEPSET:
