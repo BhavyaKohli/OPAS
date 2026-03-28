@@ -37,7 +37,7 @@ tqdm = partial(tqdm, ncols=100)
 
 
 @torch.no_grad()
-def compute_odr(dataset, colbert, image_embed_model=None, n_samp=20, stagger=2, verbose=False):
+def compute_odc(dataset, colbert, image_embed_model=None, n_samp=20, stagger=2, verbose=False):
 
     loader = dataset.get_dataloader(batch_size=1, shuffle=True)
 
@@ -209,7 +209,7 @@ if __name__ == '__main__':
     else:
         raise NotImplementedError(f"Check dataset name")
 
-    args.debug = True   # debug mode perma on for this ODR script
+    args.debug = True   # debug mode perma on for this odc script
     args.wandb_log = False
     TQDM_DISABLE = getattr(args, "tqdm_disable", False)
 
@@ -429,8 +429,8 @@ if __name__ == '__main__':
 
     odc = []
     for _ in range(10):
-        odc_ = compute_odr(test_dataset, colbert, image_embed_model=image_embed_model, verbose=True, n_samp=getattr(args, "n_samp_odc", 20))
+        odc_ = compute_odc(test_dataset, colbert, image_embed_model=image_embed_model, verbose=True, n_samp=getattr(args, "n_samp_odc", 20))
         odc.append(odc_)
 
-    print(f"{dataset} ODR: {get_mean_std_formatted(odc)}")
+    print(f"{dataset} odc: {get_mean_std_formatted(odc)}")
     exit()

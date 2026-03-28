@@ -244,7 +244,7 @@ def compute_metrics_sing(dataset, model, scoremodel, embed_model, preembed_model
 
 
 @torch.no_grad()
-def compute_odr(dataset, model, scoremodel, embed_model, preembed_model, image_embed_model=None, stagger=2, verbose=False):
+def compute_odc(dataset, model, scoremodel, embed_model, preembed_model, image_embed_model=None, stagger=2, verbose=False):
     raise NotImplementedError("Not implemented in this script")
 
 def save_models(model, scoremodel, embed_model, embed_model_inner, preembed_model, aggregator=None, final=False, latest=False):
@@ -743,10 +743,10 @@ if __name__ == '__main__':
                 if not args.debug: save_models(model, scoremodel, embed_model, embed_model_inner, preembed_model, aggregator)
 
             if enforce_order:
-                odr = compute_odr(val_dataset, model, scoremodel, embed_model, preembed_model, stagger=stagger, verbose=False)
-                logging.info(f"ODR at epoch: {i:2d} = {odr:.2f}")
+                odc = compute_odc(val_dataset, model, scoremodel, embed_model, preembed_model, stagger=stagger, verbose=False)
+                logging.info(f"odc at epoch: {i:2d} = {odc:.2f}")
                 if args.wandb_log:
-                    wandb.log({"ODR": odr})
+                    wandb.log({"odc": odc})
         else:
             mAP, mRR = 0, 0
             val_mrr_at_best = 0
