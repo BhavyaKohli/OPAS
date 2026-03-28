@@ -4,22 +4,25 @@ from main import *
 from opas.utils import get_opas_constants
 from opas.models.model_utils import load_models, get_image_embed_model
 
+import itertools
 
 @torch.no_grad()
 def compute_odc(dataset, model, scoremodel, embed_model, preembed_model, image_embed_model=None, n_samp=20, stagger=2, verbose=False):
 
     loader = dataset.get_dataloader(batch_size=1, shuffle=True)
 
-    num_samples = n_samp
     C = embed_full_corpus(dataset, embed_model, preembed_model, image_embed_model=image_embed_model)
     # C is (N, n, xoutdim)
+    M = dataset.q.shape[1]
+    PERMS = torch.tensor(list(itertools.permutations(range(M)))).long()[1:]
 
     odc = []
     for n, (q, l) in enumerate(tqdm(loader, leave=True, disable=not verbose)):
-        # if n > 100: break
+        if n > 3000: break
         q_, l_ = q[0], l[0]
 
-        shuffles = torch.stack([torch.arange(len(q_))] + [s for s in [torch.randperm(len(q_),) for _ in range(num_samples)] if not torch.equal(s, torch.arange(len(q_)))]) 
+        # shuffles = torch.stack([torch.arange(len(q_))] + [s for s in [torch.randperm(len(q_),) for _ in range(num_samples)] if not torch.equal(s, torch.arange(len(q_)))]) 
+        shuffles = torch.vstack((torch.arange(len(q_))[None], PERMS[torch.randperm(PERMS.shape[0])[:n_samp]]))
 
         q = q_[shuffles]
         l = l_[None].repeat_interleave(len(q_), dim=0)
@@ -146,6 +149,7 @@ if __name__ == "__main__":
     folder = "models" if not args.old else "models_old"
     expt_root = f"{folder}/{experiment_id}/"
     fix_lambdas = args.fix_lambdas
+    NSAMP = args.n_samp
 
     dataset = args.dataset
     DEVICE = f"cuda:{args.device}" if torch.cuda.is_available() and args.device != -1 else "cpu"
@@ -205,9 +209,9 @@ if __name__ == "__main__":
         'n_samples': 1,
     })
 
-    MAP, MRR = compute_metrics(test_dataset, model, scoremodel, embed_model, preembed_model, image_embed_model=image_embed_model, stagger=stagger, verbose=False, aggregator=aggregator)
+    # MAP, MRR = compute_metrics(test_dataset, model, scoremodel, embed_model, preembed_model, image_embed_model=image_embed_model, stagger=stagger, verbose=False, aggregator=aggregator)
 
-    print(f"Test metrics on dataset \"{dataset}\" with model loaded from experiment {experiment_id} -- MAP,MRR: {MAP:.4f},{MRR:.4f}")
+    # print(f"Test metrics on dataset \"{dataset}\" with model loaded from experiment {experiment_id} -- MAP,MRR: {MAP:.4f},{MRR:.4f}")
 
     def get_mean_std(arr):
         return np.mean(arr), np.std(arr)
@@ -217,8 +221,8 @@ if __name__ == "__main__":
         return f"{mu:.4f}±{sigma:.4f}"
 
     odc = []
-    for _ in range(10):
-        odc_ = compute_odc(test_dataset, model, scoremodel, embed_model, preembed_model, image_embed_model, stagger=args.stagger, verbose=False, n_samp=getattr(args, 'n_samp', 20))
+    for _ in tqdm(range(10), desc=f"{dataset} {NSAMP}"):
+        odc_ = compute_odc(test_dataset, model, scoremodel, embed_model, preembed_model, image_embed_model, stagger=args.stagger, verbose=False, n_samp=NSAMP)
         odc.append(odc_)
 
-    print(f"{dataset} ODC: {get_mean_std_formatted(odc)}")
+    print(f"{dataset} {NSAMP} ODC: {get_mean_std_formatted(odc)}")
