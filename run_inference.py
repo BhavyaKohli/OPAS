@@ -11,6 +11,8 @@ def compute_metrics(dataset, model, scoremodel, embed_model, preembed_model, ima
     loader = dataset.get_dataloader(batch_size=100, shuffle=True)
 
     C = embed_full_corpus(dataset, embed_model, preembed_model, image_embed_model=image_embed_model, aggregator=aggregator)
+    Cmask = torch.isclose(torch.from_numpy(dataset.c).float(), torch.tensor(0.)).sum(dim=-1) != 4000
+    C = C * Cmask.unsqueeze(-1).to(C.device)
     # C is (N, n, xoutdim)
 
     netscores = []
@@ -98,8 +100,16 @@ if __name__ == "__main__":
     with open(os.path.join(expt_root, "args.pkl"), "rb") as file:
         args = pickle.load(file)
 
+    seed_everything(args.seed)
     model, scoremodel, embed_model, preembed_model, aggregator = load_models(name="best", expt_root=expt_root, device=DEVICE, args=args)
     model.eval(), scoremodel.eval(), embed_model.eval(), preembed_model.eval()
+    
+    def num_params(model):
+        return sum(p.numel() for p in model.parameters() if p.requires_grad)
+
+    print(f"\t".join(f"{num_params(m):,}" for m in [model, scoremodel, embed_model, preembed_model]))
+    # exit()s
+
     if aggregator is not None:
         aggregator.eval()
 
