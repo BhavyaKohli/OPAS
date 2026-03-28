@@ -245,15 +245,15 @@ if __name__ == '__main__':
         assert dataset_file['Q'].shape[1]==M, 'Shape mismatch in val'
         assert dataset_file['C'].shape[1]==N, 'N Shape mismatch in val'
 
-    if N >= 50:
-        print("Long sequence dataset. Please use main_long_seq.py instead. Main differences: redefined a_vec, LamModel4LongSeq, compute_metrics with smaller batch sizes and additional internal loops.")
-        check = input(f"Delete expt dir at: {EXPT_ROOT}? y/n")
-        if check.lower() == "y":
-            import shutil
-            shutil.rmtree(EXPT_ROOT)
-        else:
-            print(f"Keeping failed expt dir {EXPT_ROOT}")
-        exit()
+    # if N >= 50:
+    #     print("Long sequence dataset. Please use main_long_seq.py instead. Main differences: redefined a_vec, LamModel4LongSeq, compute_metrics with smaller batch sizes and additional internal loops.")
+    #     check = input(f"Delete expt dir at: {EXPT_ROOT}? y/n")
+    #     if check.lower() == "y":
+    #         import shutil
+    #         shutil.rmtree(EXPT_ROOT)
+    #     else:
+    #         print(f"Keeping failed expt dir {EXPT_ROOT}")
+    #     exit()
     
     # update params
     PARAMS.N = N            # length of corpus item
@@ -447,7 +447,7 @@ if __name__ == '__main__':
 
         # validation metrics and logging
         colbert.eval()
-        MAP, MRR = compute_metrics(val_dataset, colbert, image_embed_model=image_embed_model, stagger=stagger, verbose=False)
+        MAP, MRR = compute_metrics(val_dataset, colbert, image_embed_model=image_embed_model, stagger=stagger, verbose=True)
 
         if MAP > best_val_MAP: 
             best_val_MAP = MAP
