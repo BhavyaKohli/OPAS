@@ -30,6 +30,7 @@ from transformers import get_linear_schedule_with_warmup
 from transformers import BertConfig
 from colbert.modeling.colbert import ColBERT
 from colbert.utils.amp import MixedPrecisionManager
+import itertools
 
 
 tqdm = partial(tqdm, ncols=100)
@@ -43,13 +44,16 @@ def compute_odr(dataset, colbert, image_embed_model=None, n_samp=20, stagger=2, 
     num_samples = n_samp
     C = embed_full_corpus(dataset, colbert, image_embed_model=image_embed_model)
     # C is (N, n, xoutdim)
+    M = dataset.q.shape[1]
+    PERMS = torch.tensor(list(itertools.permutations(range(M)))).long()[1:]
 
     odc = []
     for n, (q, l) in enumerate(tqdm(loader, leave=True, disable=not verbose)):
         # if n > 100: break
         q_, l_ = q[0], l[0]
 
-        shuffles = torch.stack([torch.arange(len(q_))] + [s for s in [torch.randperm(len(q_),) for _ in range(num_samples)] if not torch.equal(s, torch.arange(len(q_)))]) 
+        # shuffles = torch.stack([torch.arange(len(q_))] + [s for s in [torch.randperm(len(q_),) for _ in range(num_samples)] if not torch.equal(s, torch.arange(len(q_)))]) 
+        shuffles = torch.vstack((torch.arange(len(q_))[None], PERMS[torch.randperm(PERMS.shape[0])[:n_samp]]))
 
         q = q_[shuffles]
         l = l_[None].repeat_interleave(len(q_), dim=0)
@@ -205,7 +209,7 @@ if __name__ == '__main__':
     else:
         raise NotImplementedError(f"Check dataset name")
 
-    args.debug = True   # debug mode perma on
+    args.debug = True   # debug mode perma on for this ODR script
     args.wandb_log = False
     TQDM_DISABLE = getattr(args, "tqdm_disable", False)
 
@@ -430,132 +434,3 @@ if __name__ == '__main__':
 
     print(f"{dataset} ODR: {get_mean_std_formatted(odc)}")
     exit()
-
-
-    amp = MixedPrecisionManager(True)
-
-    losslog = []
-    logging.info("Training\n"+"*"*120+"\n"+"*"*120)
-    pbar = tqdm(range(1,nepochs+1,1), disable=TQDM_DISABLE)
-    best_val_MAP, best_val_MRR = 0, 0
-
-    for i in pbar:
-        if i == 1:
-            # pass
-            # sanity check on compute metrics
-            _, _ = compute_metrics(val_dataset, colbert, image_embed_model=image_embed_model, stagger=stagger, verbose=False)
-        
-        colbert.train()
-        wandb_losslog = []
-        inner_pbar = tqdm(trainloader, disable=TQDM_DISABLE, leave=False)
-        for n, (q, c, l) in enumerate(inner_pbar):
-            qpos, cpos, lpos = train_dataset.get_positive_samples(positive_samples)
-            q = torch.cat((q, qpos), dim=0).to(DEVICE)
-            c = torch.cat((c, cpos), dim=0).to(DEVICE)
-            l = torch.cat((l, lpos), dim=0)
-
-            attn_qq = torch.ones(len(q), q.shape[1]).to(DEVICE)
-            attn_cc = torch.ones(len(c), c.shape[1]).to(DEVICE)
-
-            # add q and c identifiers:
-
-            with amp.context():
-                q = q + batch_get_white_noise(q, args.SNR)
-                q = embed_if_image_and_normalize(q, image_embed_model)[...,::samp_rate_step]
-                c = embed_if_image_and_normalize(c, image_embed_model)[...,::samp_rate_step]
-
-                q = torch.cat((colbert.query_identifier.repeat(q.shape[0],1,1), q), dim=1)
-                c = torch.cat((colbert.doc_identifier.repeat(c.shape[0],1,1), c), dim=1)
-
-                q = colbert.pretransform_to_bert(q)
-                c = colbert.pretransform_to_bert(c)
-
-                size_q = lambda: (batch_size, M+1)
-                size_c = lambda: (batch_size, N+1)
-                q.size = size_q
-                c.size = size_c
-
-                # q, c, l are of shape bmd, bnd, b respectively
-                Q = colbert.query(q, attn_qq)#[:,0,:]
-                D = colbert.doc(c, attn_cc)#[:,0,:]      
-                # netscore = (Q @ D.T).diagonal()
-                netscore = (Q @ D.permute(0,2,1)).max(2).values.sum(1)   # b
-        
-                pos_score = netscore[torch.where(l==1)]
-                neg_score = netscore[torch.where(l==0)]
-                
-                if not getattr(args, "train_with_labels", False):
-                    neg_minus_pos = (neg_score.unsqueeze(0) - pos_score.unsqueeze(1)).reshape(-1)   # dim(pos_score) * dim(neg_score)
-                    loss = F.relu(delta + neg_minus_pos).mean() 
-                else:
-                    # score == logit corresponding to probability 1 (match)
-                    # softmax([0, score]) ==> [prob_0, prob_1]
-                    # !!! ditch !!!
-
-                    pos_score = torch.stack([torch.zeros_like(pos_score), pos_score]).T
-                    neg_score = torch.stack([torch.zeros_like(neg_score), neg_score]).T
-                    netscore = torch.cat([pos_score, neg_score], dim=0)
-                    labels = torch.tensor([1]*len(pos_score) + [0]*len(neg_score)).long()
-
-                    loss = F.cross_entropy(netscore.float(), labels.to(DEVICE), reduction="mean")
-
-            amp.backward(loss)
-            amp.step(colbert, optimizer)
-            scheduler.step()
-
-            pbar.set_postfix_str(f"loss: {loss:.4f}")
-            wandb_losslog.append(loss.item())
-            if args.wandb_log:
-                wandb.log({"loss": loss.item()})
-
-
-        # validation metrics and logging
-        colbert.eval()
-        MAP, MRR = compute_metrics(val_dataset, colbert, image_embed_model=image_embed_model, stagger=stagger, verbose=False)
-
-        if MAP > best_val_MAP: 
-            best_val_MAP = MAP
-            val_MRR_at_best = MRR
-            if not args.debug: torch.save(colbert.state_dict(), f"{EXPT_ROOT}/best.pkl")
-        
-        logging.info(f"[Epoch {i:2d}|{nepochs}] loss: {np.mean(wandb_losslog):.4f}, val MAP: {MAP:.4f}, val MRR: {MRR:.4f}, best MAP: {best_val_MAP:.4f}, MRR @ best val MAP: {val_MRR_at_best:.4f}")
-    
-        if args.wandb_log:
-            wandb.log({"val MAP": MAP, "val MRR": MRR})
-            wandb.log({"best val MAP": best_val_MAP, "best val MRR": val_MRR_at_best})
-            wandb_losslog = []
-
-        if not args.debug: torch.save(colbert.state_dict(), f"{EXPT_ROOT}/last.pkl")
-
-    colbert.load_state_dict(torch.load(f"{EXPT_ROOT}/best.pkl", map_location=DEVICE))
-    colbert.eval()
-
-    MAP, MRR = compute_metrics(test_dataset, colbert, image_embed_model=image_embed_model, stagger=stagger, verbose=not TQDM_DISABLE)
-
-    if getattr(args, "note", None):
-        note = args.note
-    else:
-        note = ""        
-    
-    logging.info(f"Final test metrics: MAP,MRR: {MAP:.4f},{MRR:.4f}")
-    if args.wandb_log: 
-        wandb.log({"Test MAP": MAP, "Test MRR": MRR})
-    print(f"Final test metrics {note}: MAP,MRR: {MAP:.4f},{MRR:.4f}")
-
-    map_bst, mrr_bst = MAP, MRR
-
-    colbert.load_state_dict(torch.load(f"{EXPT_ROOT}/last.pkl", map_location=DEVICE))
-    colbert.eval()
-
-    MAP, MRR = compute_metrics(test_dataset, colbert, image_embed_model=image_embed_model, stagger=stagger, verbose=not TQDM_DISABLE)
-    
-    logging.info(f"Final test metrics (last ckpt): MAP,MRR: {MAP:.4f},{MRR:.4f}")
-    if args.wandb_log: 
-        wandb.log({"Test MAP": MAP, "Test MRR": MRR})
-    print(f"Final test metrics (last ckpt) {note}: MAP,MRR: {MAP:.4f},{MRR:.4f}")
-
-    if note != "":
-        with open("final_results_colbert.txt", "a") as f:
-            f.write(f"{note}: MAP, MRR (best): {map_bst:.4f}, {mrr_bst:.4f} | MAP, MRR (last): {MAP:.4f}, {MRR:.4f}\n")
-
-    logging.info("*"*120+"\n"+"*"*120)
