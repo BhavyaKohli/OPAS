@@ -5,17 +5,11 @@
 for dataset in "audio" "speech" "cifar-large" "lsun"; do
     python main.py dataset=$dataset device=$device fix_lambdas=1                            # fixed lambda_j=1 for all j
     python main.py dataset=$dataset device=$device lamwt=0.                                 # disable s_lambda
-    python main.py dataset=$dataset device=$device no_lammodel=True                         # pairwise hinge score instead of LamModel
     
-    python main.py dataset=$dataset device=$device skip_embed=True skip_type=lrl            # ephi lrl
-    python main.py dataset=$dataset device=$device skip_embed=True skip_type=conv           # ephi conv
-    python main.py dataset=$dataset device=$device pretrain_embedding=True                  # pretrain ephi
-
     python main.py dataset=$dataset device=$device no_lamrelu=False                         # relu in s_lambda
     python main.py dataset=$dataset device=$device single_step_norm=1                       # SS_sum
     python main.py dataset=$dataset device=$device single_step_norm=2                       # SS_exp
 
-    python main.py dataset=$dataset device=$device use_linear_lammodel=True                 # simple LamModel
     python main.py dataset=$dataset device=$device deepset=True deepset_mode="base"         # deepset instead of LamModel, unnormalized hinge
     python main.py dataset=$dataset device=$device deepset=True deepset_mode="normalized"   # deepset instead of LamModel, normalized hinge
     python main.py dataset=$dataset device=$device deepset=True deepset_mode="cosine"       # deepset instead of LamModel, cosine
@@ -35,4 +29,13 @@ for dataset in "audio" "speech" "cifar-large" "lsun"; do
     done
 
     # python main.py dataset=long$dataset device=$device config=configs/long$dataset.yaml   # long datasets
+
+    ###########################################################################################################################
+    # the following experiments have been removed from the main script, and can be found in the dev branch of this repository #
+    ###########################################################################################################################
+    # python main.py dataset=$dataset device=$device no_lammodel=True                         # pairwise hinge score instead of LamModel
+    # python main.py dataset=$dataset device=$device pretrain_embedding=True                  # pretrain ephi
+    # python main.py dataset=$dataset device=$device use_linear_lammodel=True                 # simple LamModel
+    # python main.py dataset=$dataset device=$device skip_embed=True skip_type=lrl            # ephi lrl
+    # python main.py dataset=$dataset device=$device skip_embed=True skip_type=conv           # ephi conv
 done
