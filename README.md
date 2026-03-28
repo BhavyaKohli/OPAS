@@ -1,12 +1,18 @@
 # OPAS
 
+This is the official code for the AISTATS 2026 Paper: Learning Right Monotone Permutation Matrices for Neural Subsequence Search
+
+## Main Note
+The main branch of this repository contains the main code which has been stripped off of the effect of many script switches which enable/disable certain parameters. The dev branch contains the original versions of the code, which were used during the actual development. Although there is no difference in command usage, in case there are any unforseen issues, please raise an Issue and I will fix it immediately.
+
 ## Environment
 Please refer to the paper for the server specs. The main requirements are a CUDA version compatible with CUDA 11.8 torch versions, and a valid conda installation Use `conda env create -f env.yaml` to create an environment named "opas" at the default conda env folder (no forced prefix), and activate it using `conda activate opas`. Non-pytorch requirements are provided in `requirements.txt`, in case the pip route is preferred. Torch will need to be installed separately in this case.
 
 ## Datasets
 Download `final_data.zip` from [here](https://drive.google.com/drive/folders/1EVI_t2oObqU0uCeHaX1NrBUvg9Uvn3_H?usp=sharing) and unzip its contents into `final_data`. Due to size constraints, we provide only the processed test subset from the Music, Speech and CIFAR datasets. This will enable the execution of `run_inference.py` along with the timing and memory comparisons (on datasets other than LSUN) in `baselines/`.
 
-For custom datasets, refer to `data/audio` for audio-based datasets, and `data/image_sequence` for image sequence datasets. The training scripts might require updating to accept new datasets, and to configure the prefix for the logging directories.
+For custom datasets, refer to `data/audio` for audio-based datasets, and `data/image_sequence` for image sequence datasets.
+**The training scripts might require updating to accept new datasets, and to configure the prefix for the logging directories.**
 
 The directory structure should be as follows:
 ```
@@ -114,7 +120,7 @@ The directory structure should be as follows:
 ```
 
 ## Sanity Check
-After installing the environment, extracting the datasets and the models uploaded [here](https://drive.google.com/drive/folders/1EVI_t2oObqU0uCeHaX1NrBUvg9Uvn3_H?usp=sharing) to `final_data/` and `models/` respectively, run `bash sanity_eval.sh <gpu_id>` to run the inference script `run_inference.py` on three experiment ids (lsun dataset was too large to share), on their respective datasets.
+After installing the environment, extracting the datasets and the models uploaded [here](https://drive.google.com/drive/folders/1EVI_t2oObqU0uCeHaX1NrBUvg9Uvn3_H?usp=sharing) to `final_data/` and `models/` respectively, run `bash scripts/sanity_eval.sh <gpu_id>` to run the inference script `run_inference.py` on three experiment ids (lsun dataset was too large to share), on their respective datasets.
 
 ## Training
 Use script `main.py` for training OPAS given the dataset is in the correct format in `final_data`
@@ -202,6 +208,5 @@ Note:
 ## Early interaction
 The two scripts `main_early_interaction.py` and `run_inference_early.py` train and evaluate, respectively, OPAS models using `T` early interaction rounds. This has not been included in the paper due to poor performance.
 
-
 # Questions
-Please note that this zip file contains material extracted from our github repository which is currently not public to maintain anonymity. Please email any questions or clarifications to our anonymous id: opas76969@gmail.com
+Please feel free to reach out with any specific questions or clarifications via GitHub by submitting an Issue, or, if preferred, on this email: opas76969@gmail.com
