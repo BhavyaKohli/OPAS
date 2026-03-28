@@ -190,8 +190,12 @@ if __name__ == '__main__':
     )
 
     subs = [i for i in np.unique(SONGS_id) if i not in np.unique(SONGS_id[:600])]
-    subs_val = subs[:30]
-    subs_test = subs[30:60]
+    if SONGS.shape[-1] != 4000:
+        subs_val = subs[:90]
+        subs_test = subs[90:180]
+    else:
+        subs_val = subs[:30]
+        subs_test = subs[30:60]
     
     idxs = []
     for i in range(len(SONGS_id)):
