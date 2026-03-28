@@ -8,6 +8,7 @@ hashing/
 xhashing/
 baselines/tensors/*.pt
 wandb/
+.vscode/
 
 __pycache__/*
 __pycache__/
@@ -16,7 +17,6 @@ __pycache__/
 
 tmp/
 
-nb*
 *.pkl
 
 *gt/
