@@ -1,33 +1,29 @@
 # OPAS
 
-## environment
-Please refer to the paper for the server specs. The main requirements are a CUDA version compatible with CUDA 11.8 torch versions, and a valid conda installation. Use `conda env create -f env.yaml` to create an environment named "opas" at the default conda env folder (no forced prefix), and activate it using `conda activate opas`. Non-pytorch requirements are provided in `requirements.txt`, in case the pip route is preferred. Torch will need to be installed separately in this case.
+## Environment
+Please refer to the paper for the server specs. The main requirements are a CUDA version compatible with CUDA 11.8 torch versions, and a valid conda installation Use `conda env create -f env.yaml` to create an environment named "opas" at the default conda env folder (no forced prefix), and activate it using `conda activate opas`. Non-pytorch requirements are provided in `requirements.txt`, in case the pip route is preferred. Torch will need to be installed separately in this case.
 
-## datasets
+## Datasets
 Download `final_data.zip` from [here](https://drive.google.com/drive/folders/1EVI_t2oObqU0uCeHaX1NrBUvg9Uvn3_H?usp=sharing) and unzip its contents into `final_data`. Due to size constraints, we provide only the processed test subset from the Music, Speech and CIFAR datasets. This will enable the execution of `run_inference.py` along with the timing and memory comparisons (on datasets other than LSUN) in `baselines/`.
 
-For custom datasets, refer to `data/audio` for audio-based datasets, and `data/image_sequence` for image sequence datasets.
+For custom datasets, refer to `data/audio` for audio-based datasets, and `data/image_sequence` for image sequence datasets. The training scripts might require updating to accept new datasets, and to configure the prefix for the logging directories.
 
-The directory structure after downloading the datasets and model files should be as follows:
+The directory structure should be as follows:
 ```
 .
 ├── baselines
 │   ├── configs
 │   │   ├── main.config
+│   │   ├── main_rev.config
 │   │   └── opas_mem.config
 │   ├── naivedl
 │   │   .
 │   │   └── train.py
 │   ├── tensors
-│   │   └── get_tensors.py
+│   │   ├── get_tensors.py
+│   │   └── get_tensors_rev.py
 │   ├── README.md
-│   ├── baselines_mem_vs_perf_SINGLE.py
-│   ├── baselines_time_vs_perf.py
-│   ├── get_opas_mem.py
-│   ├── inference.log
-│   ├── runall_mem_vs_perf.py
-│   ├── sdtw.py
-│   ├── sharp.py
+│   .
 │   └── timing_comparisons.py
 ├── configs
 │   ├── README.md
@@ -37,25 +33,33 @@ The directory structure after downloading the datasets and model files should be
 ├── data
 │   ├── README.md
 │   ├── audio
+│   │   ├── music_raw
+│   │   │   └── .
+│   │   └── speech_raw
+│   │   │   └── .
 │   │   ├── generate_dataset_audio.py
-│   │   ├── get_youtube_videos.py
-│   │   ├── nb_speech_long_sequence.ipynb
+│   │   .
 │   │   └── process_and_save_data.py
-│   └── image_sequence
-│       ├── embedding_models
-│       │   ├── cifar_ae.pkl
-│       │   └── lsun_ae.pkl
-│       ├── generate_dataset_image_sequence.py
-│       └── get_rotated_sequences.py
+│   ├── image_sequence
+│   │   ├── embedding_models
+│   │   │   ├── cifar_ae.pkl
+│   │   │   └── lsun_ae.pkl
+│   │   ├── get_rotated_sequences.py
+│   │   ├── generate_dataset_image_sequence.py
+│   │   └── nb_extend_cifar_dataset.ipynb
+│   └── README.md
 ├── final_data
 │   └── README.md
 ├── models
 │   └── README.md
+├── notebooks
+│   .
+│   └── nb_new_expts.ipynb
 ├── opas
 │   ├── data.py
 │   ├── metrics
-│   │   ├── soft_dtw.py
-│   │   └── soft_dtw_cuda.py
+│   │   ├── soft_dtw_cuda.py
+│   │   └── soft_dtw.py
 │   ├── models
 │   │   ├── cifar_embed.py
 │   │   ├── deepset.py
@@ -72,37 +76,47 @@ The directory structure after downloading the datasets and model files should be
 │   │   └── tsutils.py
 │   └── utils.py
 ├── plots_and_figures
-│   ├── arial.ttf
 │   ├── data
 │   │   .
 │   │   └── times_speech.pkl
 │   .
-│   └── score_distribution_sqc.pdf
+│   └── set_xfm_vs_deepset.pdf
+├── scripts
+│   .
+│   └── ablations.sh
 ├── README.md
-├── ablations.sh
-├── sanity_eval.sh
-├── main.py
-├── main_long_seq.py                        # use for long sequence datasets (N>=50)
-├── main_direct_score.py
-├── main_early_interaction.py
-├── main_old.py                             # legacy script (small changes with current version)
+├── env.yaml
 ├── requirements.txt
-├── run_lsh_eval_multi.py
-├── run_inference.py
-├── run_inference_early.py
-├── run_lsh_multi.py
-├── struct.txt
-├── train_ae.py
-├── train_hyperplanes.py
-├── train_prehash.py
-├── eval_lsh.py
-└── train_xfmprehash.py
+├── train_ae.py                 # base script to train autoencoders for image-sequence datasets
+│
+├── main_colbert.py             # main colbert training script
+├── main_colbert_for_odc.py     # clone of main script, used only for computing ODC
+├── main_colbert_for_time.py    # clone of main script, used only for computing eval time
+├── main_colbert_single_vec.py  # [exp] colbert ablation, using single vector scoring    
+│
+├── main.py                     # main opas training script
+├── main_long_seq.py            # opas training script for long datasets
+├── main_direct_score.py        # [exp] ablation, using ephi to generate scores directly
+├── main_early_interaction.py   # [exp] ablation, using early interaction to get alignments
+├── main_bert.py                # [exp] ablation, using bert-based ephi
+│
+├── run_inference.py            # main inference script
+├── run_inference_long_seq.py   # inference for long datasets
+├── run_inference_odc.py        # inference with ODC computation
+├── run_inference_early.py      # [exp] inference with early interaction
+│
+├── train_prehash.py            # main script for training SetAggr
+├── train_hyperplanes.py        # train hyperplanes using trained SetAggr
+├── eval_lsh.py                 # evaluate trained SetAggr and hyperplanes
+├── train_xfmprehash.py         # [exp] train some SetAggr while training OPAS
+├── run_lsh_multi.py            # [utility] parallel hyperplane training
+└── run_lsh_eval_multi.py       # [utility] parallel lsh evaluations
 ```
 
-## sanity check
+## Sanity Check
 After installing the environment, extracting the datasets and the models uploaded [here](https://drive.google.com/drive/folders/1EVI_t2oObqU0uCeHaX1NrBUvg9Uvn3_H?usp=sharing) to `final_data/` and `models/` respectively, run `bash sanity_eval.sh <gpu_id>` to run the inference script `run_inference.py` on three experiment ids (lsun dataset was too large to share), on their respective datasets.
 
-## training
+## Training
 Use script `main.py` for training OPAS given the dataset is in the correct format in `final_data`
 
 Scripts used to train OPAS on the Music, Speech, CIFAR, and LSUN datasets (numbers used in the paper) are given below. They use the defualt configurations for the respective datasets stored in `configs/`.  
@@ -117,10 +131,10 @@ python main.py dataset=cifar-large device=$device
 python main.py dataset=lsun device=$device
 ```
 
-### note: alternate training scripts
+### Note: alternate training scripts
 The scripts `main_direct_score.py` and `main_long_seq.py` are essentially the same script as `main.py`, with some special modifications for their resp. use cases. The direct score ablation discussed in Appendix L.7 uses the former, and long sequence datasets with N>=50 use the latter. If there is an attempt to run `main.py` with a long sequence dataset, an error will be raised and the script will abort. 
 
-## evaluation
+## Evaluation
 For a trained model with experiment id `<expt_id>`, run only evaluation using
 
 ```python
@@ -131,13 +145,13 @@ For cross-task results, simply change `$dataset` to a different dataset (assumin
 
 Note: there is a unique `run_inference_long_seq.py` as a companion script to `main_long_seq.py`. There is no companion inference script for `main_direct_score.py`. Please refer to the logfiles for those experiments to check test set metrics.
 
-## ablations
+## Ablations
 Refer to script `ablations.sh` for commands used to run the reported ablation studies.
 
-## timing and memory
+## Timing and Memory
 Refer to the `baselines/` folder for obtaining timing and memory data.
 
-## plots and figures
+## Plots and Figures
 Refer to the `plots_and_figures/` folder for the notebooks and code used for generating the plots for OPAS.
 
 ## OPAS and LSH (SetAggr and hyperplane training)
