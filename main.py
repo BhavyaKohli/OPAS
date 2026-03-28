@@ -19,15 +19,15 @@ from opas.data import PairDatasetTrain, PairDatasetTest
 from opas.models.main import LamModel, ScoreModel, PositionalEncoding, TransformInput, DummyScoreModel, Attention_Layer
 from opas.models.cifar_embed import Autoencoder
 from opas.models.lsun_embed import Autoencoder as LSUNAutoencoder
-from opas.models.ts_encoders import Conv1dTS, EncConv1dTS, MelConv1dTS
+# from opas.models.ts_encoders import Conv1dTS, EncConv1dTS, MelConv1dTS
 from opas.models.deepset import DeepSetModel
 from opas.models.sortlrl import SortLRL
 from opas.models.model_utils import load_models
 
 from functools import partial
-from transformers import get_linear_schedule_with_warmup, AdamW
+from transformers import get_linear_schedule_with_warmup#, AdamW
 
-import torchaudio.transforms as T
+# import torchaudio.transforms as T
 
 
 tqdm = partial(tqdm, ncols=100)
@@ -189,7 +189,7 @@ def compute_odr(dataset, model, scoremodel, embed_model, preembed_model, image_e
     # C is (N, n, xoutdim)
 
     odc = []
-    for n, (q, l) in enumerate(tqdm(loader, leave=True, disable=not verbose)):
+    for n, (q, l) in enumerate(tqdm(loader, leave=False, disable=not verbose)):
         if n > 100: break
         q_, l_ = q[0], l[0]
 
@@ -365,6 +365,13 @@ if __name__ == '__main__':
             format="%(levelname)s (%(asctime)s): %(message)s",
             datefmt="%d/%m/%Y %I:%M:%S %p"
         )
+    else:
+        print("Debug mode ON: Not saving logs or models")
+        logging.basicConfig(
+            level=logging.INFO,
+            format="%(levelname)s (%(asctime)s): %(message)s",
+            datefmt="%d/%m/%Y %I:%M:%S %p"
+        )
     
     logging.info("python " + " ".join(sys.argv))
     logging.info(f"Running with args: {args}")
@@ -520,7 +527,7 @@ if __name__ == '__main__':
         nn.Linear(d_model, d_model),
     )
     identity = lambda x: x
-    conv_transform = Conv1dTS(n_ch=4, latent=d_model)
+    # conv_transform = Conv1dTS(n_ch=4, latent=d_model)
     # conv_transform = EncConv1dTS(latent=d_model, samp_rate=samp_rate)
     # conv_transform = MelConv1dTS(latent=d_model, samp_rate=samp_rate)
     
@@ -619,7 +626,7 @@ if __name__ == '__main__':
     optimizer = torch.optim.Adam(model.parameters(), lr=lr, amsgrad=True)
     sc_optimizer = torch.optim.Adam(scoremodel.parameters(), lr=lr, amsgrad=True, weight_decay=1e-2)
 
-    tf = T.LFCC(sample_rate=4000, n_lfcc=40, log_lf=False, speckwargs={"n_fft": 1024}).to(DEVICE)
+    # tf = T.LFCC(sample_rate=4000, n_lfcc=40, log_lf=False, speckwargs={"n_fft": 1024}).to(DEVICE)
     
     ################ NOT USED ######################
     if args.lfcc: 
@@ -715,10 +722,10 @@ if __name__ == '__main__':
     enforce_order = args.enforce_order
 
     for i in pbar:
-        if i == 1:
-            if not args.use_sing_xfmer:
-                # sanity check on compute metrics
-                _, _ = compute_metrics(val_dataset, model, scoremodel, embed_model, preembed_model, image_embed_model=image_embed_model, stagger=stagger, verbose=True, aggregator=aggregator)
+        # if i == 1:
+        #     if not args.use_sing_xfmer:
+        #         # sanity check on compute metrics
+        #         _, _ = compute_metrics(val_dataset, model, scoremodel, embed_model, preembed_model, image_embed_model=image_embed_model, stagger=stagger, verbose=True, aggregator=aggregator)
         
         model.train(), scoremodel.train(), embed_model.train(), preembed_model.train()
         if DEEPSET:
@@ -846,7 +853,7 @@ if __name__ == '__main__':
         if DEEPSET:
             aggregator.eval()
         if not args.use_sing_xfmer:
-            MAP, MRR = compute_metrics(val_dataset, model, scoremodel, embed_model, preembed_model, image_embed_model=image_embed_model, stagger=stagger, verbose=False, aggregator=aggregator)
+            MAP, MRR = compute_metrics(val_dataset, model, scoremodel, embed_model, preembed_model, image_embed_model=image_embed_model, stagger=stagger, verbose=True, aggregator=aggregator)
 
             if MAP > best_val_MAP: 
                 best_val_MAP = MAP
@@ -854,7 +861,7 @@ if __name__ == '__main__':
                 if not args.debug: save_models(model, scoremodel, embed_model, preembed_model, aggregator)
 
             if enforce_order:
-                odr = compute_odr(val_dataset, model, scoremodel, embed_model, preembed_model, stagger=stagger, verbose=False)
+                odr = compute_odr(val_dataset, model, scoremodel, embed_model, preembed_model, image_embed_model=image_embed_model, stagger=stagger, verbose=True)
                 logging.info(f"ODR at epoch: {i:2d} = {odr:.2f}")
                 if args.wandb_log:
                     wandb.log({"ODR": odr})
