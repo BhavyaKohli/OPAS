@@ -2,6 +2,8 @@
 
 This is the official code for the AISTATS 2026 Paper: Learning Right Monotone Permutation Matrices for Neural Subsequence Search
 
+![opas-inferece](plots_and_figures/opas_inference.png)
+
 ## Main Note
 The main branch of this repository contains the main code which has been stripped off of the effect of many script switches which enable/disable certain parameters. The dev branch contains the original versions of the code, which were used during the actual development. Although there is no difference in command usage, in case there are any unforseen issues, please raise an Issue and I will fix it immediately.
 
